@@ -50,7 +50,7 @@ Ayrıntılar ve Docker + HTTPS kurulumu için: [docs/DEMO_KURULUM.md](docs/DEMO_
 
 Yeni dışa aktarımlar `Datasets/raw/` klasörüne konur ve yenileme şu sırayla yapılır: `run_phase1.py` → `run_phase2.py` → `run_phase3_firm_registry.py`. Kur kaydı ayrıca çekilir: `python src/phase5_pricing/fx_rates.py fetch --start 2024-11-01`. Son olarak sunucu yeniden başlatılır. Bu işlem modelleri yeniden eğitmez.
 
-Not: Katılım raporu, üye dizini ve kur dosyasının adları şu anda `BundleConfig` içinde tam dosya adıyla tanımlı. Yeni adla gelen dosyalar için bu yapılandırmanın güncellenmesi gerekir.
+Katılım raporu, üye dizini ve kur dosyası adıyla değil rolüyle bulunur, bu yüzden yeni tarihli dosyalar için kodda ayar değiştirmek gerekmez. `Datasets/raw/` içinde katılım raporundan ve üye dizininden **birer tane** bulunmalıdır; eski dışa aktarımlar klasör dışına taşınır (birden fazla varsa çalıştırma hata verir). Kur için `Datasets/external/fx/` içindeki kapsamı en geç biten kayıt seçilir. Ayrıntılar: [docs/DEMO_KURULUM.md](docs/DEMO_KURULUM.md) §1.
 
 ## Durum (4 Ekim 2026)
 
@@ -59,4 +59,4 @@ Faz 7 ve Faz 8'in kodu yazıldı ve Codex tarafından kaynak üzerinden incelend
 Bilinen sınırlar:
 
 - Satış ve teklif geçmişi 4 Haziran 2026'da bitiyor.
-- Kur kaydı 2 Ekim 2026'da bitiyor. Bu nedenle 9 Ekim 2026'dan sonraki tarihler için fiyat gösterilmez; firma listesi yine gelir.
+- Mevcut kur kaydı 2 Ekim 2026'da bitiyor. Yeni kayıt çekilmezse 9 Ekim 2026'dan sonraki tarihler için fiyat gösterilmez; firma listesi yine gelir. Yeni kayıt çekilip sunucu yeniden başlatıldığında kendiliğinden kullanılır.

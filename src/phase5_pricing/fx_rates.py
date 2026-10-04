@@ -9,6 +9,7 @@ This module only obtains and stores the bars:
   fetch_usdtry(start, end)            -> FxFetch (bars, raw bytes, provenance)   [network]
   parse_yahoo_chart(raw)              -> DataFrame bar_date, bar_start_utc, open, high, low, close
   save_fx_snapshot(fetch, directory)  -> Path of the new CSV (raw JSON and provenance beside it)
+  latest_fx_snapshot(directory)       -> Path of the snapshot CSV with the latest coverage
   load_fx(path)                       -> validated DataFrame (input of price_features)
   compare_fx(old, new)                -> dict: overlap, changed / added / missing bars
 
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -36,6 +38,9 @@ SOURCE = "Yahoo Finance chart API"
 URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?period1={p1}&period2={p2}&interval=1d"
 DEFAULT_DIR = Path(__file__).resolve().parents[2] / "Datasets" / "external" / "fx"
 COLUMNS = ["bar_date", "bar_start_utc", "open", "high", "low", "close"]
+# The name save_fx_snapshot writes: USDTRY_yahoo_daily_<first>_<last>_fetched<stamp>.csv
+SNAPSHOT_NAME = re.compile(r"^USDTRY_yahoo_daily_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})"
+                           r"_fetched(\d{8}T\d{6})\.csv$")
 
 
 def _fail(msg: str) -> None:
@@ -127,6 +132,24 @@ def save_fx_snapshot(fetch: FxFetch, directory=DEFAULT_DIR) -> Path:
     with open(paths["prov"], "x", encoding="utf-8") as fh:
         fh.write(json.dumps(prov, indent=2) + "\n")
     return paths["csv"]
+
+
+def latest_fx_snapshot(directory=DEFAULT_DIR) -> Path:
+    """
+    The snapshot CSV to use: the one whose coverage ends latest; on a tie, the later
+    fetch. Chosen from the names save_fx_snapshot writes (never from file times), so the
+    choice is deterministic. Other files in the folder are ignored.
+    """
+    d = Path(directory)
+    found = []
+    for p in d.glob("*.csv"):
+        m = SNAPSHOT_NAME.match(p.name)
+        if m:
+            found.append(((m.group(2), m.group(3)), p))
+    if not found:
+        raise FileNotFoundError(f"[fx_rates] no USDTRY snapshot CSV in {d}; run "
+                                f"'python3 src/phase5_pricing/fx_rates.py fetch --start ...'")
+    return max(found)[1]
 
 
 def load_fx(path) -> pd.DataFrame:

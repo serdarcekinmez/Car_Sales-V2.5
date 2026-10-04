@@ -36,6 +36,7 @@ import pandas as pd
 from common.normalize import ascii_key_series
 from common.entity_resolution import flag_internal
 from common.anomaly_flags import is_test_code
+from common.raw_files import RawFileError, find_single_raw
 
 SHEET = "Rapor"  # every raw workbook keeps its data on a sheet called "Rapor"
 
@@ -52,12 +53,11 @@ PARTICIPATION_COLUMNS = ["aa_kodu", "aa_tarihi", "firma_adi", "firma_key"]
 
 
 def find_aa_katilim(raw_dir: Path) -> Path:
-    """Find the AA Katılım participation workbook by a keyword in its filename."""
-    for path in sorted(Path(raw_dir).glob("*.xlsx")):
-        name = path.name.lower()
-        if "katılım" in name or "katilim" in name:
-            return path
-    raise SystemExit(f"[phase2] could not find an AA Katılım .xlsx in {raw_dir}")
+    """The single AA Katılım participation workbook in raw_dir (by filename keyword)."""
+    try:
+        return find_single_raw(raw_dir, "aa_katilim")
+    except RawFileError as exc:
+        raise SystemExit(f"[phase2] {exc}") from None
 
 
 def load_aa_katilim(path: Path) -> pd.DataFrame:

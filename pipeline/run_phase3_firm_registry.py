@@ -129,9 +129,7 @@ def load_inputs(raw_dir: Path, phase1_dir: Path, lookups_dir: Path) -> dict:
     aa_raw = P.load_aa_katilim(aa_path)
     clean_participation, part_stats = P.clean_participation(aa_raw, internal_lookup)
 
-    dir_path = next(p for p in sorted(Path(raw_dir).glob("*.xlsx"))
-                    if "üye" in p.name.lower() or "uye" in p.name.lower()
-                    or "kurumsal" in p.name.lower())
+    dir_path = FR.find_member_directory(raw_dir)
 
     records = [
         {"role": "member_directory", "path": str(dir_path), "rows": len(directory),

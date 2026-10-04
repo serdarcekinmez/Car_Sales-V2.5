@@ -40,6 +40,7 @@ import pandas as pd
 
 from common.normalize import ascii_key_series
 from common.entity_resolution import flag_internal
+from common.raw_files import RawFileError, find_single_raw
 
 SHEET = "Rapor"
 
@@ -106,16 +107,17 @@ def _empty(columns: list[str]) -> pd.DataFrame:
     return pd.DataFrame({c: pd.Series(dtype="string") for c in columns})
 
 
+def find_member_directory(raw_dir: Path) -> Path:
+    """The single Üye-Kurumsal member-directory workbook in raw_dir (by filename keyword)."""
+    try:
+        return find_single_raw(raw_dir, "member_directory")
+    except RawFileError as exc:
+        raise FileNotFoundError(f"[firm_registry] {exc}") from None
+
+
 def load_member_directory(raw_dir: Path) -> pd.DataFrame:
     """Read the Üye-Kurumsal member directory and add the canonical firm key."""
-    path = None
-    for p in sorted(Path(raw_dir).glob("*.xlsx")):
-        name = p.name.lower()
-        if "üye" in name or "uye" in name or "kurumsal" in name:
-            path = p
-            break
-    if path is None:
-        raise FileNotFoundError(f"[firm_registry] no Üye-Kurumsal .xlsx found in {raw_dir}")
+    path = find_member_directory(raw_dir)
     df = pd.read_excel(path, sheet_name=SHEET)
     missing = [c for c in DIRECTORY_REQUIRED if c not in df.columns]
     if missing:

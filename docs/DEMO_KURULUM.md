@@ -21,12 +21,18 @@ Datasets/interim/phase1_preparation/clean_reel_db.parquet
 Datasets/interim/phase2_labels/labeled_candidates.parquet
 Datasets/interim/phase3_firm_universe/firm_registry.parquet
 Datasets/lookups/internal_firm_lookup.csv
-Datasets/raw/2501-260604 AA Katılım Raporu.xlsx
-Datasets/raw/Üye-Kurumsal Raporu_2026-06-07.xlsx
-Datasets/external/fx/USDTRY_yahoo_daily_2024-11-01_2026-10-02_fetched20261003T074901.csv
+Datasets/raw/<adında "Katılım" geçen tek .xlsx>        (ör. 2501-260604 AA Katılım Raporu.xlsx)
+Datasets/raw/<adında "Üye" / "Kurumsal" geçen tek .xlsx> (ör. Üye-Kurumsal Raporu_2026-06-07.xlsx)
+Datasets/external/fx/<kapsamı en geç biten USDTRY_yahoo_daily_*.csv>
 workflow/runs/phase4_experiment_build/results/final_model.json
 workflow/runs/phase5_experiment_build/results/models/lgbm_noR.json
 ```
+
+Katılım raporu, üye dizini ve kur dosyası adıyla değil rolüyle bulunur; yeni tarihli bir dosya geldiğinde kodda ayar değiştirmek gerekmez:
+
+- **Katılım raporu ve üye dizini:** `Datasets/raw/` içinde her biri için **tam bir** dosya bulunmalıdır. Hiç yoksa ya da birden fazla varsa uygulama başlarken hata verir (ayrıntı sunucu günlüğündedir). Eski dışa aktarımlar ham klasörün dışına taşınır. Faz 1–3 betikleri de aynı kuralı kullanır.
+- **Kur:** `Datasets/external/fx/` içindeki kayıtlardan kapsamı en geç biten seçilir (eşitlikte en son çekilen). Seçim dosya adındaki tarihlere göre yapılır, dosya zamanına bakılmaz. Eski kayıtlar silinmez.
+- Seçilen dosyanın adı sunucu günlüğüne yazılır ve özeti `bundle_id`'ye girer. Belirli bir dosyayı sabitlemek gerekirse `BundleConfig` içinde `aa_katilim`, `member_directory` veya `fx_file` alanına göreli yol verilir.
 
 Uygulama yalnızca şu dosyaya yazar: geri bildirim ve tahmin kayıtlarının tutulduğu SQLite dosyası. Varsayılan yeri `Datasets/phase8_demo/demo.sqlite3` dosyasıdır ve git dışında kalır.
 
@@ -146,7 +152,7 @@ location / {
 
 ## 5. Yenileme ve sınırlar
 
-- **Kur:** Kur dosyası 2 Ekim 2026'da bitiyor. Fiyat için tahmin tarihinden önceki en fazla 7 günlük kur gerekir. Bu nedenle 9 Ekim 2026'dan sonraki tahmin tarihlerinde fiyat "gösterilemiyor" olur ve firma listesi yine gelir. Yeni kur kaydı çekilip `BundleConfig.fx_file` güncellenmeden bu düzelmez. Uygulama kuru kendisi çekmez.
+- **Kur:** Kur dosyası 2 Ekim 2026'da bitiyor. Fiyat için tahmin tarihinden önceki en fazla 7 günlük kur gerekir. Bu nedenle 9 Ekim 2026'dan sonraki tahmin tarihlerinde fiyat "gösterilemiyor" olur ve firma listesi yine gelir. Düzeltmek için yeni kur kaydı çekilir (`python src/phase5_pricing/fx_rates.py fetch --start 2024-11-01`) ve sunucu yeniden başlatılır; yeni dosya kendiliğinden seçilir. Uygulama kuru kendisi çekmez.
 - **Geçmiş veri:** Satış ve teklif geçmişi 4 Haziran 2026'da bitiyor. Bugünkü araçlar için ekranda "eski veri" uyarısı görünür. Yeni dışa aktarımlar geldiğinde önce Faz 1–3 çıktıları yenilenir, sonra sunucu yeniden başlatılır. Bu işlem modeli yeniden eğitmez.
 - **Paket kimliği:** Her tahmin; veri, model, Faz 7 kodu ve çalışma ortamı özetini (`bundle_id`), filtre kurallarını ve Faz 8 sunucu kodunun özetini birlikte saklar. Böylece bir sonucun neden değiştiği izlenebilir.
 

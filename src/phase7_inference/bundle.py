@@ -7,9 +7,16 @@ the two frozen model artifacts. Everything is read and indexed once at load; a p
 never rebuilds history, trains, evaluates or touches the network. Nothing happens at
 import time.
 
-PATHS. BundleConfig takes an explicit project root; every file is a path relative to it
-with a default naming the current accepted file EXACTLY (no glob, no "newest file"
-guess). A missing file is a clear initialization error naming the logical input.
+PATHS. BundleConfig takes an explicit project root; every file is a path relative to it.
+Fixed-name outputs (Phase 1-5 parquet, lookups, models) default to their exact path. The
+three exports that arrive under a new, dated name each refresh default to None, meaning
+"find it" (AUTO_INPUTS): the AA Katılım report and the member directory are the single
+workbook of their role in raw_dir (common.raw_files: none or several is an error, no
+"newest file" guess), the FX file is the snapshot in fx_dir whose coverage ends latest
+(fx_rates.latest_fx_snapshot, by the snapshot name, never file times). Setting the field
+to a relative path pins that exact file instead. The chosen file is hashed into bundle_id
+like any other input and its file name is logged. A missing file is a clear
+initialization error naming the logical input.
 
 PARTIAL LOADING. The shared inputs (clean_sales, member directory) must load, or
 load_bundle raises BundleError. Model A inputs (bids, positives, registry, participation,
@@ -55,6 +62,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from common import raw_files as _raw_files
 from phase1_preparation.clean_sales import FROZEN_SALES_COLUMNS
 from phase2_labels import participation as _participation
 from phase5_pricing import fx_rates as _fx_rates
@@ -77,7 +85,7 @@ MEMBER_DIRECTORY_COLUMNS = ("Firma Ünvanı", "Detay Tip")      # io_load.REQUIR
 _SRC = Path(__file__).resolve().parents[1]
 SOURCE_FILES = (
     "common/__init__.py", "common/normalize.py", "common/entity_resolution.py",
-    "common/anomaly_flags.py",
+    "common/anomaly_flags.py", "common/raw_files.py",
     "phase1_preparation/__init__.py", "phase1_preparation/clean_sales.py",
     "phase2_labels/__init__.py", "phase2_labels/participation.py",
     "phase3_firm_universe/candidate_pool.py",
@@ -108,10 +116,12 @@ class BundleConfig:
     labeled_candidates: str = "Datasets/interim/phase2_labels/labeled_candidates.parquet"
     firm_registry: str = "Datasets/interim/phase3_firm_universe/firm_registry.parquet"
     internal_lookup: str = "Datasets/lookups/internal_firm_lookup.csv"
-    aa_katilim: str = "Datasets/raw/2501-260604 AA Katılım Raporu.xlsx"
-    member_directory: str = "Datasets/raw/Üye-Kurumsal Raporu_2026-06-07.xlsx"
-    fx_file: str = ("Datasets/external/fx/"
-                    "USDTRY_yahoo_daily_2024-11-01_2026-10-02_fetched20261003T074901.csv")
+    # None = find the current file (AUTO_INPUTS); a relative path pins one exact file.
+    aa_katilim: str | None = None
+    member_directory: str | None = None
+    fx_file: str | None = None
+    raw_dir: str = "Datasets/raw"
+    fx_dir: str = "Datasets/external/fx"
     model_a: str = "workflow/runs/phase4_experiment_build/results/final_model.json"
     model_b: str = "workflow/runs/phase5_experiment_build/results/models/lgbm_noR.json"
     stale_after_days: int = 30
@@ -156,9 +166,34 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+AUTO_INPUTS = ("aa_katilim", "member_directory", "fx_file")
+
+
+def _find_auto(config: BundleConfig, name: str) -> Path:
+    """The current file of an AUTO_INPUTS input. Errors name the input; details are logged."""
+    for field_name in ("raw_dir", "fx_dir"):
+        rel = getattr(config, field_name)
+        if not isinstance(rel, str) or not rel or Path(rel).is_absolute():
+            raise BundleError(f"config.{field_name} must be a non-empty path relative to "
+                              f"config.root")
+    try:
+        if name == "fx_file":
+            path = _fx_rates.latest_fx_snapshot(Path(config.root) / config.fx_dir)
+        else:
+            path = _raw_files.find_single_raw(Path(config.root) / config.raw_dir, name)
+    except (FileNotFoundError, OSError) as exc:
+        log.error("phase7 bundle: input %s could not be found: %s", name, exc)
+        raise BundleError(f"input {name!r} could not be found (missing or ambiguous); "
+                          f"see server log") from None
+    log.info("phase7 bundle: input %s -> %s", name, path.name)
+    return path
+
+
 def _resolve(config: BundleConfig, name: str) -> Path:
     """The file of logical input `name`. Errors name the input only; the path is logged."""
     rel = getattr(config, name)
+    if rel is None and name in AUTO_INPUTS:
+        return _find_auto(config, name)
     if not isinstance(rel, str) or not rel or Path(rel).is_absolute():
         raise BundleError(f"config.{name} must be a non-empty path relative to config.root")
     path = Path(config.root) / rel
