@@ -1,0 +1,13 @@
+# Phase 8 demo runtime — Python 3.10.
+# Pinned to the environment the frozen models were built and inspected in
+# (both model artifacts record lightgbm 4.6.0; a different LightGBM refuses Model A).
+numpy==2.2.6
+pandas==2.3.3
+pyarrow==24.0.0
+openpyxl==3.1.5
+scipy==1.15.3
+lightgbm==4.6.0
+fastapi==0.136.3
+starlette==1.0.0
+pydantic==2.13.4
+uvicorn==0.46.0

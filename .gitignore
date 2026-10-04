@@ -1,0 +1,75 @@
+# Business data and generated outputs
+/Datasets/
+/data/
+/artifacts/
+/outputs/
+/reports/
+*.parquet
+*.feather
+*.arrow
+*.xlsx
+*.xls
+*.sqlite
+*.sqlite3
+
+# Trained model binaries
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.h5
+*.hdf5
+*.cbm
+*.ubj
+*.model
+
+# Operational records and local agent/editor configuration
+/workflow/runs/
+.claude/settings.local.json
+.codex/
+.agents/
+.vscode/
+.idea/
+.mcp.json
+
+# Credentials and local environment
+.env
+.env.*
+!.env.example
+credentials*.json
+secrets*.json
+service-account*.json
+service_account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Environments, caches and build products
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+node_modules/
+
+# Local temporary files
+*.log
+*.tmp
+*.bak
+.DS_Store
+*:Zone.Identifier
+

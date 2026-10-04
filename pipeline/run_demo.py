@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""
+run_demo.py  —  Phase 8: start the private customer demo, or create its password hash.
+
+  python pipeline/run_demo.py hash-password
+      Asks twice for the pilot password (not echoed, at least 12 characters) and prints
+      the GARAJ_DEMO_PASSWORD_HASH=... line to paste into .env. Nothing else happens.
+
+  python pipeline/run_demo.py serve [--root DIR] [--store FILE] [--host H] [--port P]
+                                   [--insecure-local-http | --behind-https]
+                                   [--allowed-host NAME ...]
+      Starts ONE uvicorn worker serving phase8_demo.app. It trains, evaluates, refreshes
+      and fetches nothing; the Phase-7 bundle is read from --root (default: GARAJ_DEMO_ROOT
+      or this repository). Configuration: GARAJ_DEMO_* environment variables (.env.example).
+
+HOST RULES
+  * Default host 127.0.0.1 (this machine only).
+  * --insecure-local-http drops the cookie Secure flag so http://127.0.0.1:PORT works;
+    it is refused on any non-loopback host.
+  * Any non-loopback host (e.g. 0.0.0.0 in Docker) requires --behind-https: TLS is
+    terminated by a reverse proxy in front of the app.
+  * --behind-https requires explicit allowed host names (--allowed-host or
+    GARAJ_DEMO_ALLOWED_HOSTS): the Host / Origin checks must know the public name.
+"""
+from __future__ import annotations
+
+import argparse
+import getpass
+import ipaddress
+import logging
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+
+
+def _is_loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def _fail(message: str) -> int:
+    print(f"run_demo: {message}", file=sys.stderr)
+    return 2
+
+
+def cmd_hash_password(_args) -> int:
+    from phase8_demo import security
+
+    password = getpass.getpass(f"Pilot parolası (en az {security.MIN_PASSWORD_CHARS} "
+                               f"karakter): ")
+    again = getpass.getpass("Parola tekrar: ")
+    if password != again:
+        return _fail("parolalar eşleşmiyor")
+    try:
+        encoded = security.hash_password(password)
+    except ValueError as exc:
+        return _fail(f"parola kabul edilmedi: {exc}")
+    print(f"GARAJ_DEMO_PASSWORD_HASH={encoded}")
+    return 0
+
+
+def cmd_serve(args) -> int:
+    loopback = _is_loopback(args.host)
+    if args.insecure_local_http and args.behind_https:
+        return _fail("--insecure-local-http and --behind-https exclude each other")
+    if args.insecure_local_http and not loopback:
+        return _fail("--insecure-local-http is only allowed on a loopback host "
+                     "(127.0.0.1 / localhost / ::1)")
+    if not loopback and not args.behind_https:
+        return _fail(f"host {args.host!r} is reachable from other machines; serve it only "
+                     "behind an HTTPS reverse proxy and pass --behind-https")
+    allowed = args.allowed_host or None
+    if args.behind_https and allowed is None \
+            and not os.environ.get("GARAJ_DEMO_ALLOWED_HOSTS", "").strip():
+        return _fail("--behind-https needs the public host name: --allowed-host NAME or "
+                     "GARAJ_DEMO_ALLOWED_HOSTS")
+
+    from phase8_demo.app import ConfigError, create_app, settings_from_env
+
+    try:
+        settings = settings_from_env(os.environ, root=args.root, store_path=args.store,
+                                     secure_cookies=not args.insecure_local_http,
+                                     allowed_hosts=allowed)
+        app = create_app(settings)
+    except ConfigError as exc:
+        return _fail(str(exc))
+
+    import uvicorn
+
+    log = logging.getLogger("run_demo")
+    log.info("serving on %s:%d (secure cookies: %s, allowed hosts: %s); data root %s",
+             args.host, args.port, settings.secure_cookies,
+             ", ".join(sorted(settings.allowed_hosts)), settings.root)
+    if loopback and settings.secure_cookies and not args.behind_https:
+        log.warning("cookies are Secure: open the app through HTTPS, or restart with "
+                    "--insecure-local-http for plain http://127.0.0.1:%d", args.port)
+    uvicorn.run(app, host=args.host, port=args.port, workers=1, proxy_headers=False,
+                server_header=False, access_log=True, log_level="info",
+                timeout_keep_alive=5, limit_concurrency=64)
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Garaj Phase 8 private customer demo")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("hash-password", help="print a GARAJ_DEMO_PASSWORD_HASH line")
+    serve = sub.add_parser("serve", help="start the demo web server")
+    serve.add_argument("--root", help="data / model root (default GARAJ_DEMO_ROOT or repo)")
+    serve.add_argument("--store", help="SQLite file (default GARAJ_DEMO_STORE or "
+                                       "<root>/Datasets/phase8_demo/demo.sqlite3)")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--insecure-local-http", action="store_true",
+                       help="cookies without Secure; loopback host only")
+    serve.add_argument("--behind-https", action="store_true",
+                       help="required for non-loopback hosts; TLS by a reverse proxy")
+    serve.add_argument("--allowed-host", action="append",
+                       help="public host name the browser uses (repeatable)")
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+    if args.command == "hash-password":
+        return cmd_hash_password(args)
+    if not 1 <= args.port <= 65535:
+        return _fail("--port must be in 1..65535")
+    return cmd_serve(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

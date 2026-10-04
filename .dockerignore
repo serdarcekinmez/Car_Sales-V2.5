@@ -1,0 +1,29 @@
+# Allow-list for Dockerfile.demo: everything is excluded unless re-included below.
+# Datasets, models, workflow/runs, reports, .git, .env and credentials never enter the
+# build context.
+*
+
+!requirements-demo.txt
+!pipeline/run_demo.py
+!src/common/
+!src/phase1_preparation/
+!src/phase2_labels/
+!src/phase3_firm_universe/
+!src/phase4_modeling/
+!src/phase5_pricing/
+!src/phase7_inference/
+!src/phase8_demo/
+
+# Re-exclude generated or sensitive files inside the allowed folders.
+**/__pycache__
+**/*.py[cod]
+**/.env
+**/.env.*
+**/*.parquet
+**/*.xlsx
+**/*.xls
+**/*.csv
+**/*.sqlite
+**/*.sqlite3
+**/*.log
+**/*:Zone.Identifier

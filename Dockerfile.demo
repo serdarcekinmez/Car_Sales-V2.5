@@ -1,0 +1,48 @@
+# Phase 8 private customer demo — code-only image.
+# Data, model artifacts and secrets are NOT in the image: mount the data read-only at
+# /data (same relative paths as in the repository), give the SQLite store a writable
+# volume and pass the GARAJ_DEMO_* settings with --env-file. See docs/DEMO_KURULUM.md.
+FROM python:3.10-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# LightGBM needs the OpenMP runtime.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgomp1 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --system --gid 10001 demo \
+ && useradd --system --uid 10001 --gid demo --home-dir /app --shell /usr/sbin/nologin demo
+
+WORKDIR /app
+COPY requirements-demo.txt /app/requirements-demo.txt
+RUN pip install -r /app/requirements-demo.txt
+
+# Only the packages the demo imports (phase7_inference.bundle.SOURCE_FILES + phase8_demo)
+# and the runner. .dockerignore is an allow-list as a second guard.
+COPY src/common/ /app/src/common/
+COPY src/phase1_preparation/ /app/src/phase1_preparation/
+COPY src/phase2_labels/ /app/src/phase2_labels/
+COPY src/phase3_firm_universe/ /app/src/phase3_firm_universe/
+COPY src/phase4_modeling/ /app/src/phase4_modeling/
+COPY src/phase5_pricing/ /app/src/phase5_pricing/
+COPY src/phase7_inference/ /app/src/phase7_inference/
+COPY src/phase8_demo/ /app/src/phase8_demo/
+COPY pipeline/run_demo.py /app/pipeline/run_demo.py
+
+RUN mkdir -p /data /var/lib/garaj-demo \
+ && chown demo:demo /var/lib/garaj-demo
+
+ENV GARAJ_DEMO_ROOT=/data \
+    GARAJ_DEMO_STORE=/var/lib/garaj-demo/demo.sqlite3
+
+USER demo
+EXPOSE 8000
+VOLUME ["/var/lib/garaj-demo"]
+
+# 0.0.0.0 inside the container; publish it only to the host's loopback
+# (-p 127.0.0.1:8000:8000) behind the HTTPS reverse proxy.
+CMD ["python", "/app/pipeline/run_demo.py", "serve", "--host", "0.0.0.0", "--port", "8000", "--behind-https"]
