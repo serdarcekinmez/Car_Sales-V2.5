@@ -36,13 +36,18 @@ with opaque ids and a few display fields; the plate / query id stays on the serv
 replay is a demonstration only (the frozen models may have seen that period). A Phase-7
 InputError on a replay becomes a generic 400 example_invalid (the Phase-7 text is dropped).
 
+SHUTDOWN. A local run (pipeline/run_demo.py serve --allow-shutdown, loopback host only) gives
+create_app an on_shutdown callback; the signed-in user can then stop the whole server from
+the page ("Oturumu kapat", POST /api/shutdown). Without the callback the route answers 404,
+so a public deployment can never be stopped from the browser.
+
 ACCESS. Every /api route except /api/login and /api/session requires a session; every
 mutating route requires CSRF + JSON + allowed Origin (security.py). Predictions, CSV and
 feedback are filtered by owner (the configured account) in the store. One account serves
 one customer; separate customers need separate deployments.
 
 PUBLIC API
-  DemoSettings, settings_from_env(environ, ...), create_app(settings) -> ASGI app
+  DemoSettings, settings_from_env(environ, ...), create_app(settings, on_shutdown=None)
   serving_code_sha256(), client_view(response, ...)
 """
 from __future__ import annotations
@@ -696,8 +701,9 @@ def _load_pages() -> dict:
     return pages
 
 
-def create_app(settings: DemoSettings):
-    """The ASGI application (FastAPI wrapped in GuardMiddleware). See module docstring."""
+def create_app(settings: DemoSettings, *, on_shutdown=None):
+    """The ASGI application (FastAPI wrapped in GuardMiddleware). See module docstring.
+    on_shutdown: optional zero-argument callable that stops the server (local runs only)."""
     if not isinstance(settings, DemoSettings):
         raise TypeError("settings must be DemoSettings")
     settings.validate()
@@ -812,7 +818,7 @@ def create_app(settings: DemoSettings):
         if session is None:
             return {"authenticated": False}
         return {"authenticated": True, "username": session.username,
-                "csrf_token": session.csrf_token}
+                "csrf_token": session.csrf_token, "can_shutdown": on_shutdown is not None}
 
     @api.post("/api/login")
     async def login(request: Request):
@@ -841,7 +847,8 @@ def create_app(settings: DemoSettings):
         token, session = sessions.create(settings.username)
         log.info("phase8 demo: login %s from %s", session.username, client)
         resp = JSONResponse({"authenticated": True, "username": session.username,
-                             "csrf_token": session.csrf_token})
+                             "csrf_token": session.csrf_token,
+                             "can_shutdown": on_shutdown is not None})
         resp.set_cookie(cookie, token, max_age=int(sessions.ttl_seconds), path="/",
                         secure=settings.secure_cookies, httponly=True, samesite="strict")
         return resp
@@ -851,6 +858,20 @@ def create_app(settings: DemoSettings):
         session_of(request, mutate=True)
         sessions.revoke(request.cookies.get(cookie))
         resp = JSONResponse({"authenticated": False})
+        resp.delete_cookie(cookie, path="/", secure=settings.secure_cookies, httponly=True,
+                           samesite="strict")
+        return resp
+
+    @api.post("/api/shutdown")
+    async def shutdown(request: Request):
+        if on_shutdown is None:
+            raise ApiError(404, "not_found", "Bulunamadı.")
+        session = session_of(request, mutate=True)
+        sessions.revoke(request.cookies.get(cookie))
+        log.info("phase8 demo: shutdown requested by %s", session.username)
+        # Stop slightly later so this response still reaches the browser.
+        threading.Timer(0.5, on_shutdown).start()
+        resp = JSONResponse({"stopping": True})
         resp.delete_cookie(cookie, path="/", secure=settings.secure_cookies, httponly=True,
                            samesite="strict")
         return resp

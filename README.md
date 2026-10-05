@@ -17,8 +17,12 @@ Modellerin eğitimi, değerlendirmesi, raporlar ve çalışma kayıtları burada
 | `src/phase7_inference/` | Ortak tahmin katmanı: araç girdisi, iki modelin bağlantısı, filtreler, paket kimliği |
 | `src/common`, `src/phase1_preparation` … `src/phase5_pricing` | Tahmin katmanının ve veri yenilemenin kullandığı modüller (yalnızca gerekenler) |
 | `pipeline/run_demo.py` | Parola özeti üretir ve sunucuyu başlatır |
+| `baslat.sh`, `baslat.bat` | Ubuntu / Windows tek tıkla başlatıcı (sayfadaki "Oturumu kapat" sunucuyu durdurur) |
+| `streamlit_app.py`, `requirements.txt`, `packages.txt`, `.streamlit/` | Streamlit Community Cloud sürümü |
+| `pipeline/pack_demo_data.py` | Streamlit için veri ve model dosyalarını tek zip'te toplar |
 | `pipeline/run_phase1.py`, `run_phase2.py`, `run_phase3_firm_registry.py` | Yeni dışa aktarımlardan veri girdilerini yeniden üretir |
 | `docs/DEMO_KURULUM.md` | Kurulum, çalıştırma ve güvenlik (Türkçe) |
+| `docs/STREAMLIT_YAYIN.md` | GitHub + Streamlit Community Cloud ile paylaşma (Türkçe) |
 | `Dockerfile.demo`, `.dockerignore`, `.env.example`, `requirements-demo.txt` | Paketleme ve ayar dosyaları |
 
 ## Git'e girmeyenler
@@ -44,7 +48,9 @@ python pipeline/run_demo.py serve --insecure-local-http
 # http://127.0.0.1:8000
 ```
 
-Ayrıntılar ve Docker + HTTPS kurulumu için: [docs/DEMO_KURULUM.md](docs/DEMO_KURULUM.md).
+`.env` hazırsa kısaca `./baslat.sh` (Ubuntu) veya `baslat.bat` (Windows) yeterlidir.
+
+Ayrıntılar ve Docker + HTTPS kurulumu için: [docs/DEMO_KURULUM.md](docs/DEMO_KURULUM.md). Streamlit üzerinden paylaşım için: [docs/STREAMLIT_YAYIN.md](docs/STREAMLIT_YAYIN.md).
 
 ## Veriyi yenileme
 

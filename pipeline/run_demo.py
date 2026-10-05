@@ -8,7 +8,8 @@ run_demo.py  —  Phase 8: start the private customer demo, or create its passwo
 
   python pipeline/run_demo.py serve [--root DIR] [--store FILE] [--host H] [--port P]
                                    [--insecure-local-http | --behind-https]
-                                   [--allowed-host NAME ...]
+                                   [--allowed-host NAME ...] [--allow-shutdown]
+                                   [--open-browser]
       Starts ONE uvicorn worker serving phase8_demo.app. It trains, evaluates, refreshes
       and fetches nothing; the Phase-7 bundle is read from --root (default: GARAJ_DEMO_ROOT
       or this repository). Configuration: GARAJ_DEMO_* environment variables (.env.example).
@@ -21,6 +22,10 @@ HOST RULES
     terminated by a reverse proxy in front of the app.
   * --behind-https requires explicit allowed host names (--allowed-host or
     GARAJ_DEMO_ALLOWED_HOSTS): the Host / Origin checks must know the public name.
+  * --allow-shutdown shows the "Oturumu kapat" button: the signed-in user can stop this
+    server from the page (the terminal / command window then returns or closes). It is
+    refused on any non-loopback host, so a public deployment cannot be stopped remotely.
+  * --open-browser opens http://127.0.0.1:PORT in the default browser once the server runs.
 """
 from __future__ import annotations
 
@@ -77,6 +82,8 @@ def cmd_serve(args) -> int:
         return _fail(f"host {args.host!r} is reachable from other machines; serve it only "
                      "behind an HTTPS reverse proxy and pass --behind-https")
     allowed = args.allowed_host or None
+    if args.allow_shutdown and not loopback:
+        return _fail("--allow-shutdown is only allowed on a loopback host")
     if args.behind_https and allowed is None \
             and not os.environ.get("GARAJ_DEMO_ALLOWED_HOSTS", "").strip():
         return _fail("--behind-https needs the public host name: --allowed-host NAME or "
@@ -84,15 +91,21 @@ def cmd_serve(args) -> int:
 
     from phase8_demo.app import ConfigError, create_app, settings_from_env
 
+    import uvicorn
+
+    server: uvicorn.Server | None = None
+
+    def stop_server() -> None:
+        if server is not None:
+            server.should_exit = True
+
     try:
         settings = settings_from_env(os.environ, root=args.root, store_path=args.store,
                                      secure_cookies=not args.insecure_local_http,
                                      allowed_hosts=allowed)
-        app = create_app(settings)
+        app = create_app(settings, on_shutdown=stop_server if args.allow_shutdown else None)
     except ConfigError as exc:
         return _fail(str(exc))
-
-    import uvicorn
 
     log = logging.getLogger("run_demo")
     log.info("serving on %s:%d (secure cookies: %s, allowed hosts: %s); data root %s",
@@ -101,9 +114,19 @@ def cmd_serve(args) -> int:
     if loopback and settings.secure_cookies and not args.behind_https:
         log.warning("cookies are Secure: open the app through HTTPS, or restart with "
                     "--insecure-local-http for plain http://127.0.0.1:%d", args.port)
-    uvicorn.run(app, host=args.host, port=args.port, workers=1, proxy_headers=False,
-                server_header=False, access_log=True, log_level="info",
-                timeout_keep_alive=5, limit_concurrency=64)
+    config = uvicorn.Config(app, host=args.host, port=args.port, workers=1,
+                            proxy_headers=False, server_header=False, access_log=True,
+                            log_level="info", timeout_keep_alive=5, limit_concurrency=64)
+    server = uvicorn.Server(config)
+    if args.open_browser:
+        import threading
+        import webbrowser
+
+        url = f"http://{'127.0.0.1' if loopback else args.host}:{args.port}/"
+        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+    server.run()
+    if args.allow_shutdown:
+        log.info("server stopped from the page")
     return 0
 
 
@@ -123,6 +146,11 @@ def main(argv=None) -> int:
                        help="required for non-loopback hosts; TLS by a reverse proxy")
     serve.add_argument("--allowed-host", action="append",
                        help="public host name the browser uses (repeatable)")
+    serve.add_argument("--allow-shutdown", action="store_true",
+                       help="show the 'Oturumu kapat' button that stops this server; "
+                            "loopback host only")
+    serve.add_argument("--open-browser", action="store_true",
+                       help="open the page in the default browser after start")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO,

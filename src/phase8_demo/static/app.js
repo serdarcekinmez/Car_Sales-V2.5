@@ -16,6 +16,7 @@
     current: null,
     cities: [],
     excluded: new Map(),          // firma_key -> display name
+    marked: new Map(),            // firms ticked in the shown list: firma_key -> display name
     priceVerdict: null,
     busy: false,
     statusTimer: null,
@@ -189,6 +190,7 @@
     $('session-user').textContent = session.username;
     show($('view-login'), false);
     show($('session-box'), true);
+    show($('btn-shutdown'), Boolean(session.can_shutdown));
     show($('view-app'), true);
     if (!$('f-date').value) $('f-date').value = localToday();
     loadStatus();
@@ -437,6 +439,8 @@
     state.busy = on;
     for (const id of ['btn-predict', 'btn-replay']) $(id).disabled = on;
     $('btn-apply-filters').disabled = on || !state.current || !state.current.stored;
+    for (const b of document.querySelectorAll('#firms-body [data-exclude]')) b.disabled = on || !(state.current && state.current.stored);
+    updateBulkBar();
     show($('result-progress'), on);
     if (on) show($('result-empty'), false);
   }
@@ -450,6 +454,7 @@
       state.current = view;
       renderResult(view);
       refreshRecent();
+      $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) {
       const box = $('result-error');
       box.textContent = (e.status === 400 ? 'Girdi kabul edilmedi: ' : 'Tahmin üretilemedi: ') + e.message
@@ -491,10 +496,17 @@
     runRequest(`/api/predictions/${encodeURIComponent(state.current.prediction_id)}/rerun`, { filters: f.filters });
   }
 
-  function excludeFirm(key, name) {
-    state.excluded.set(key, name || key);
+  function excludeFirms(entries) {
+    if (state.busy || !entries.length) return;
+    for (const [key, name] of entries) state.excluded.set(key, name || key);
     renderExcludedChips();
     rerunWithFilters();
+  }
+
+  function updateBulkBar() {
+    const n = state.marked.size;
+    $('firms-bulk-count').textContent = n ? `${fmtInt.format(n)} firma işaretli` : 'Birden fazla firmayı işaretleyip birlikte çıkarabilirsiniz.';
+    $('btn-exclude-selected').disabled = n === 0 || state.busy || !(state.current && state.current.stored);
   }
 
   async function refreshRecent() {
@@ -614,6 +626,9 @@
     warningList($('firms-warnings'), a.warnings);
     const csv = $('btn-csv');
     show($('firms-excluded'), false);
+    show($('firms-bulk'), false);
+    state.marked.clear();
+    updateBulkBar();
     $('firms-summary').textContent = '';
     if (a.status !== 'ok') {
       show(csv, false);
@@ -637,6 +652,7 @@
       const ol = el('ol', { cls: 'firm-list' });
       for (const e of a.call_list) ol.append(firmRow(view, e, fb.get(e.firma_key)));
       body.append(ol);
+      show($('firms-bulk'), Boolean(view.stored));
     }
 
     const ahead = a.excluded_ahead || [];
@@ -662,8 +678,14 @@
     const snippets = e.snippets || [];
     const li = el('li', { cls: 'firm' });
 
+    const mark = el('input', { attrs: { type: 'checkbox', 'aria-label': `${name} firmasını işaretle`, disabled: !view.stored } });
+    mark.addEventListener('change', () => {
+      if (mark.checked) state.marked.set(e.firma_key, name); else state.marked.delete(e.firma_key);
+      updateBulkBar();
+    });
     li.append(el('div', { cls: 'firm-rank', attrs: { 'aria-label': `Sıra ${e.rank}` } }, String(e.rank),
-      e.rank_original !== e.rank ? el('small', { text: `model ${e.rank_original}` }) : null));
+      e.rank_original !== e.rank ? el('small', { text: `model ${e.rank_original}` }) : null,
+      el('label', { attrs: { title: 'Birlikte listeden çıkarmak için işaretle' } }, mark)));
 
     const main = el('div', { cls: 'firm-main' });
     main.append(el('div', { cls: 'firm-name', text: name }));
@@ -696,8 +718,8 @@
       on: { click: () => toggleNotSuitable(view, e, fbBox, status, error) },
     }));
     actions.append(el('button', {
-      cls: 'btn btn-quiet', text: 'Listeden çıkar', attrs: { type: 'button', disabled: !canAct, title: 'Firmayı dışla ve listeyi yeniden oluştur' },
-      on: { click: () => excludeFirm(e.firma_key, name) },
+      cls: 'btn btn-quiet', text: 'Listeden çıkar', attrs: { type: 'button', disabled: !canAct || state.busy, 'data-exclude': '1', title: 'Firmayı dışla ve listeyi yeniden oluştur' },
+      on: { click: () => excludeFirms([[e.firma_key, name]]) },
     }));
     li.append(actions);
     li.append(fbBox);
@@ -874,6 +896,23 @@
       show($('result-empty'), true);
       showLogin('Çıkış yapıldı.');
     });
+
+    $('btn-shutdown').addEventListener('click', async () => {
+      if (!window.confirm('Uygulama tamamen kapatılsın mı? Sunucu durur; yeniden açmak için başlatma komutunu tekrar çalıştırmanız gerekir.')) return;
+      try {
+        await api('POST', '/api/shutdown', {});
+      } catch (e) {
+        toast('Kapatılamadı: ' + e.message);
+        return;
+      }
+      clearInterval(state.statusTimer);
+      state.statusTimer = null;
+      document.body.replaceChildren(el('main', null, el('div', { cls: 'card state-card' },
+        el('h2', { text: 'Uygulama kapatıldı' }),
+        el('p', { cls: 'muted', text: 'Sunucu durduruldu. Bu sekmeyi kapatabilirsiniz. Yeniden kullanmak için başlatma komutunu tekrar çalıştırın.' }))));
+      window.close();
+    });
+    $('btn-exclude-selected').addEventListener('click', () => excludeFirms(Array.from(state.marked.entries())));
 
     $('tab-new').addEventListener('click', () => setTab('new'));
     $('tab-history').addEventListener('click', () => setTab('history'));

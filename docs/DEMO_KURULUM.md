@@ -68,6 +68,24 @@ Tarayıcıda `http://127.0.0.1:8000` adresini açın ve `.env` içindeki kullan�
 - Başka bir veri kökü veya kayıt dosyası için `--root DİZİN` ve `--store DOSYA` kullanılır.
 - Sunucu yeniden başlatılınca bütün oturumlar kapanır. Kayıtlı tahminler ve geri bildirimler SQLite dosyasında kalır.
 
+### Tek tıkla başlatma ve "Oturumu kapat"
+
+`.venv` ve `.env` bir kez hazırlandıktan sonra sunucu tek komutla başlatılabilir:
+
+- **Ubuntu / WSL:** `./baslat.sh`
+- **Windows:** `baslat.bat` dosyasına çift tıklayın.
+
+Betikler `.env` dosyasını yükler, sunucuyu `--insecure-local-http --allow-shutdown --open-browser` ile başlatır ve tarayıcıyı açar. Sağ üstte iki düğme görünür:
+
+- **Çıkış:** Yalnızca giriş oturumunu kapatır. Sunucu çalışmaya devam eder.
+- **Oturumu kapat:** Onay sorulur, ardından sunucu tamamen durur. Komut penceresi (Windows) ya da betiğin açtığı terminal kendiliğinden kapanır. Yeniden kullanmak için betik tekrar çalıştırılır.
+
+`--allow-shutdown` yalnızca bu bilgisayardan erişilen adreste (127.0.0.1) kabul edilir. Docker / HTTPS yayınında bu düğme hiç görünmez ve `/api/shutdown` 404 döner. Böylece uzaktaki bir kullanıcı sunucuyu kapatamaz.
+
+### Birden fazla firmayı listeden çıkarma
+
+Firma listesindeki her satırın sıra numarasının altında bir onay kutusu bulunur. Çıkarılacak firmalar işaretlenir ve listenin üstündeki **İşaretlileri listeden çıkar** düğmesine basılır. Seçilen tüm firmalar tek bir yeniden hesaplamayla çıkarılır. Satırdaki **Listeden çıkar** düğmesi tek firma için çalışmaya devam eder. Dışlamalar birikir ve "Dışlanan firmalar" alanında listelenir (en fazla 200 firma). Her bir dışlama, alandaki × işaretiyle geri alınabilir.
+
 Windows PowerShell'de doğrudan çalıştırma (WSL yoksa):
 
 ```powershell
@@ -80,6 +98,8 @@ $env:GARAJ_DEMO_USERNAME = "pilot"
 $env:GARAJ_DEMO_PASSWORD_HASH = "scrypt:16384:8:1:..."   # hash-password çıktısındaki değer
 py pipeline\run_demo.py serve --insecure-local-http
 ```
+
+Demoyu GitHub üzerinden Streamlit Community Cloud'da paylaşmak için: [STREAMLIT_YAYIN.md](STREAMLIT_YAYIN.md).
 
 ## 3. Sunucuda yayın (Docker + HTTPS ters vekil)
 
@@ -161,8 +181,9 @@ location / {
 1. Sunucu açılıyor ve üst şeritte iki model "hazır" görünüyor.
 2. Yanlış parola reddediliyor ve 5 denemeden sonra giriş geçici olarak kapanıyor.
 3. Yeni bir araç için firma listesi ve TL fiyatı aynı ekranda geliyor.
-4. Bir firma "Listeden çıkar" ile dışlanıyor ve liste aşağıdan dolduruluyor. Yeni tahmin no oluşuyor; eski tahmin değişmiyor.
+4. Bir firma "Listeden çıkar" ile dışlanıyor ve liste aşağıdan dolduruluyor. Yeni tahmin no oluşuyor; eski tahmin değişmiyor. İki veya daha fazla firma işaretlenip "İşaretlileri listeden çıkar" ile birlikte çıkarılabiliyor.
 5. 10 Ekim 2026 veya sonrası bir tahmin tarihinde fiyat "gösterilemiyor", firma listesi geliyor.
 6. CSV dosyası Excel'de Türkçe karakterlerle açılıyor.
 7. Firma ve fiyat geri bildirimi kaydediliyor ve tahmin yeniden açıldığında görünüyor.
 8. Çıkıştan sonra API istekleri 401 dönüyor.
+9. `baslat.sh` / `baslat.bat` ile açılan sunucu, "Oturumu kapat" düğmesiyle duruyor ve pencere kapanıyor.
