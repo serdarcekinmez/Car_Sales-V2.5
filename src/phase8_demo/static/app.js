@@ -266,11 +266,71 @@
     strip.append(el('span', { cls: 'status-item' + (comp.model_b === 'ready' ? '' : ' is-bad'), text: 'Fiyat modeli: ' + (comp.model_b === 'ready' ? 'hazır' : 'kullanılamıyor') }));
   }
 
-  function fillDatalist(id, values) {
-    const dl = $(id);
-    if (!dl) return;
-    clear(dl);
-    for (const v of values || []) dl.append(el('option', { attrs: { value: v } }));
+  // ------------------------------------------------------------------ combobox
+  // Own suggestion dropdown instead of <datalist>: Firefox shows datalist options but often
+  // does not let them be clicked. Values come from state.lists (id -> array); typing filters
+  // (Turkish case-insensitive, "contains"), click / Enter selects, arrows move, Esc closes.
+  const lists = {};
+  const trLower = (t) => String(t).toLocaleLowerCase('tr-TR');
+
+  function fillDatalist(id, values) { lists[id] = (values || []).slice(); }
+
+  function attachCombo(input, listId, onPick) {
+    const wrap = el('div', { cls: 'combo' });
+    input.parentNode.insertBefore(wrap, input);
+    const toggle = el('button', { cls: 'combo-toggle', text: '▾', attrs: { type: 'button', tabindex: '-1', 'aria-label': 'Seçenekleri göster' } });
+    const menu = el('ul', { cls: 'combo-menu', attrs: { role: 'listbox' } });
+    menu.hidden = true;
+    wrap.append(input, toggle, menu);
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    let active = -1;
+    let items = [];
+
+    function close() { menu.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); }
+    function highlight(i) {
+      active = i;
+      menu.querySelectorAll('li').forEach((li, k) => li.classList.toggle('is-active', k === i));
+      const li = menu.children[i];
+      if (li) li.scrollIntoView({ block: 'nearest' });
+    }
+    function pick(v) {
+      input.value = v;
+      close();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      if (onPick) onPick(v);
+    }
+    function open(all) {
+      const values = lists[listId] || [];
+      const q = all ? '' : trLower(input.value.trim());
+      items = (q ? values.filter((v) => trLower(v).includes(q)) : values).slice(0, 200);
+      clear(menu);
+      if (!items.length) { close(); return; }
+      for (const v of items) {
+        const li = el('li', { text: v, attrs: { role: 'option' } });
+        li.addEventListener('mousedown', (ev) => { ev.preventDefault(); pick(v); });
+        menu.append(li);
+      }
+      menu.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      active = -1;
+    }
+    input.addEventListener('focus', () => open(false));
+    input.addEventListener('click', () => { if (menu.hidden) open(false); });
+    input.addEventListener('input', (ev) => { if (ev.isTrusted) open(false); });
+    input.addEventListener('blur', () => setTimeout(close, 120));
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); if (menu.hidden) open(false); else highlight(Math.min(active + 1, items.length - 1)); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); highlight(Math.max(active - 1, 0)); }
+      else if (ev.key === 'Enter' && !menu.hidden && active >= 0) { ev.preventDefault(); ev.stopImmediatePropagation(); pick(items[active]); }
+      else if (ev.key === 'Escape') close();
+    });
+    toggle.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      if (menu.hidden) { input.focus(); open(true); } else close();
+    });
   }
 
   function fillOptions(opts) {
@@ -921,6 +981,8 @@
     $('btn-replay').addEventListener('click', replayExample);
     $('btn-apply-filters').addEventListener('click', rerunWithFilters);
     $('btn-add-city').addEventListener('click', addCity);
+    $('f-city').removeAttribute('list');
+    attachCombo($('f-city'), 'dl-cities', () => addCity());
     $('f-city').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addCity(); } });
     $('btn-clear-excluded').addEventListener('click', () => { state.excluded.clear(); renderExcludedChips(); });
     $('f-date').addEventListener('change', () => { if (state.status) renderStatus(state.status); });
@@ -929,6 +991,9 @@
       input.addEventListener('input', () => updatePreview(input));
     }
     for (const input of document.querySelectorAll('#pane-new [data-suggest]')) {
+      const listId = input.getAttribute('list');
+      input.removeAttribute('list');
+      attachCombo(input, listId);
       input.addEventListener('change', () => updateHint(input));
     }
     const marka = document.querySelector('[data-field="Marka"]');
