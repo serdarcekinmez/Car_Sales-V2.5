@@ -20,6 +20,7 @@
   <div class="session-box" id="session-box" hidden>
     <span class="session-user" id="session-user"></span>
     <button type="button" class="btn btn-quiet" id="btn-logout">Çıkış</button>
+    <button type="button" class="btn btn-danger" id="btn-shutdown" hidden title="Sunucuyu durdurur; terminal / komut penceresi de kapanır">Oturumu kapat</button>
   </div>
 </header>
 
@@ -57,11 +58,11 @@
             <button type="button" class="tab" id="tab-history" role="tab" aria-selected="false" aria-controls="pane-history">Geçmiş örnek</button>
           </div>
 
-          <form id="pane-new" class="pane" role="tabpanel" novalidate>
-            <fieldset class="group">
+          <form id="pane-new" class="pane pane-grid" role="tabpanel" novalidate>
+            <fieldset class="group group-vehicle">
               <legend>Araç</legend>
-              <div class="grid-2">
-                <label class="field span-2">
+              <div class="grid-4">
+                <label class="field">
                   <span class="field-label">Marka <abbr title="zorunlu">*</abbr></span>
                   <input type="text" data-field="Marka" list="dl-marka" maxlength="60" autocomplete="off" data-suggest="marka">
                   <span class="hint" data-hint-for="Marka" hidden></span>
@@ -105,7 +106,7 @@
                   <input type="text" data-field="Renk" list="dl-renk" maxlength="40" autocomplete="off" data-suggest="renk">
                   <span class="hint" data-hint-for="Renk" hidden></span>
                 </label>
-                <label class="field span-2">
+                <label class="field span-c2">
                   <span class="field-label">Lokasyon <span class="muted">(aracın bulunduğu yer)</span></span>
                   <input type="text" data-field="Lokasyon" list="dl-lokasyon" maxlength="100" autocomplete="off" data-suggest="lokasyon">
                   <span class="hint" data-hint-for="Lokasyon" hidden></span>
@@ -113,7 +114,7 @@
               </div>
             </fieldset>
 
-            <fieldset class="group">
+            <fieldset class="group group-condition">
               <legend>Durum ve hasar <span class="muted">(boş bırakılabilir)</span></legend>
               <div class="grid-2">
                 <label class="field">
@@ -126,38 +127,37 @@
                   <input type="text" inputmode="numeric" data-field="Tramer Adedi" data-kind="int" maxlength="4" autocomplete="off">
                   <span class="num-preview" data-preview-for="Tramer Adedi"></span>
                 </label>
-                <label class="field span-2">
+                <label class="field">
                   <span class="field-label">Tramer tutarı (TL)</span>
                   <input type="text" inputmode="decimal" data-field="Tramer Tutarı" data-kind="dec" maxlength="16" autocomplete="off">
                   <span class="num-preview" data-preview-for="Tramer Tutarı"></span>
                 </label>
                 <label class="field span-2">
                   <span class="field-label">Ekspertiz metni</span>
-                  <textarea data-field="Ekspertiz" rows="3" maxlength="4000" placeholder="Boşsa hasar bilgisi bilinmiyor sayılır; hasarsız kabul edilmez."></textarea>
+                  <textarea data-field="Ekspertiz" rows="2" maxlength="4000" placeholder="Boşsa hasar bilgisi bilinmiyor sayılır; hasarsız kabul edilmez."></textarea>
                 </label>
               </div>
             </fieldset>
 
-            <fieldset class="group">
+            <fieldset class="group group-sale">
               <legend>Satış bilgisi</legend>
               <div class="grid-2">
-                <label class="field span-2">
-                  <span class="field-label">Satıcı kısa ünvanı</span>
-                  <input type="text" data-field="Satıcı Kısa Ünvan" maxlength="160" autocomplete="off">
+                <label class="field">
+                  <span class="field-label">Tahmin tarihi <abbr title="zorunlu">*</abbr></span>
+                  <input type="date" id="f-date" required>
                 </label>
                 <label class="field">
                   <span class="field-label">Plaka <span class="muted">(isteğe bağlı)</span></span>
                   <input type="text" data-field="Plaka" maxlength="16" autocomplete="off">
                 </label>
-                <label class="field">
-                  <span class="field-label">Min.Fiyat (TL) <span class="muted">(bilgi)</span></span>
+                <label class="field span-2">
+                  <span class="field-label">Satıcı kısa ünvanı</span>
+                  <input type="text" data-field="Satıcı Kısa Ünvan" maxlength="160" autocomplete="off">
+                </label>
+                <label class="field span-2">
+                  <span class="field-label">Min.Fiyat (TL) <span class="muted">(bilgi; fiyat tahmini bunu kullanmaz)</span></span>
                   <input type="text" inputmode="decimal" data-field="Min.Fiyat" data-kind="dec" maxlength="16" autocomplete="off">
                   <span class="num-preview" data-preview-for="Min.Fiyat"></span>
-                </label>
-                <p class="field-note span-2">Min.Fiyat yalnızca kayıt içindir; ana fiyat tahmini Min.Fiyat kullanmaz.</p>
-                <label class="field span-2">
-                  <span class="field-label">Tahmin tarihi <abbr title="zorunlu">*</abbr></span>
-                  <input type="date" id="f-date" required>
                 </label>
               </div>
             </fieldset>
@@ -174,7 +174,7 @@
 
           <fieldset class="group group-filters">
             <legend>Firma listesi filtreleri</legend>
-            <div class="grid-2">
+            <div class="grid-4">
               <label class="field">
                 <span class="field-label">Liste uzunluğu</span>
                 <input type="text" inputmode="numeric" id="f-topn" maxlength="3" autocomplete="off" value="20">
@@ -186,19 +186,19 @@
                   <button type="button" class="btn btn-small" id="btn-add-city">Ekle</button>
                 </div>
               </div>
-              <div class="chips span-2" id="city-chips" aria-label="Seçili şehirler"></div>
-              <label class="check span-2">
+              <label class="check check-cell">
                 <input type="checkbox" id="f-active">
                 <span>Yalnızca son 365 günde kayıtlı teklifi olan firmalar</span>
               </label>
-              <div class="span-2">
+              <div class="field">
                 <div class="row-between">
                   <span class="field-label">Dışlanan firmalar</span>
                   <button type="button" class="btn btn-quiet btn-small" id="btn-clear-excluded" hidden>Temizle</button>
                 </div>
                 <div class="chips" id="exclude-chips" aria-label="Dışlanan firmalar"></div>
-                <p class="field-note" id="exclude-empty">Listeden çıkardığınız firmalar burada görünür.</p>
+                <p class="field-note" id="exclude-empty">Listeden çıkardığınız firmalar burada görünür. Sonuç listesinde birden fazla firmayı işaretleyip birlikte çıkarabilirsiniz.</p>
               </div>
+              <div class="chips span-2" id="city-chips" aria-label="Seçili şehirler"></div>
             </div>
           </fieldset>
 
@@ -254,6 +254,10 @@
               </div>
               <p class="summary" id="firms-summary"></p>
               <ul class="warnings" id="firms-warnings"></ul>
+              <div class="bulk-bar" id="firms-bulk" hidden>
+                <span class="muted" id="firms-bulk-count">0 firma işaretli</span>
+                <button type="button" class="btn btn-small btn-secondary" id="btn-exclude-selected" disabled>İşaretlileri listeden çıkar</button>
+              </div>
               <div id="firms-body"></div>
               <details class="excluded" id="firms-excluded" hidden>
                 <summary id="firms-excluded-title"></summary>

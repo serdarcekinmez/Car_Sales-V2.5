@@ -16,6 +16,7 @@
     current: null,
     cities: [],
     excluded: new Map(),          // firma_key -> display name
+    marked: new Map(),            // firms ticked in the shown list: firma_key -> display name
     priceVerdict: null,
     busy: false,
     statusTimer: null,
@@ -189,6 +190,7 @@
     $('session-user').textContent = session.username;
     show($('view-login'), false);
     show($('session-box'), true);
+    show($('btn-shutdown'), Boolean(session.can_shutdown));
     show($('view-app'), true);
     if (!$('f-date').value) $('f-date').value = localToday();
     loadStatus();
@@ -264,11 +266,71 @@
     strip.append(el('span', { cls: 'status-item' + (comp.model_b === 'ready' ? '' : ' is-bad'), text: 'Fiyat modeli: ' + (comp.model_b === 'ready' ? 'hazır' : 'kullanılamıyor') }));
   }
 
-  function fillDatalist(id, values) {
-    const dl = $(id);
-    if (!dl) return;
-    clear(dl);
-    for (const v of values || []) dl.append(el('option', { attrs: { value: v } }));
+  // ------------------------------------------------------------------ combobox
+  // Own suggestion dropdown instead of <datalist>: Firefox shows datalist options but often
+  // does not let them be clicked. Values come from state.lists (id -> array); typing filters
+  // (Turkish case-insensitive, "contains"), click / Enter selects, arrows move, Esc closes.
+  const lists = {};
+  const trLower = (t) => String(t).toLocaleLowerCase('tr-TR');
+
+  function fillDatalist(id, values) { lists[id] = (values || []).slice(); }
+
+  function attachCombo(input, listId, onPick) {
+    const wrap = el('div', { cls: 'combo' });
+    input.parentNode.insertBefore(wrap, input);
+    const toggle = el('button', { cls: 'combo-toggle', text: '▾', attrs: { type: 'button', tabindex: '-1', 'aria-label': 'Seçenekleri göster' } });
+    const menu = el('ul', { cls: 'combo-menu', attrs: { role: 'listbox' } });
+    menu.hidden = true;
+    wrap.append(input, toggle, menu);
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    let active = -1;
+    let items = [];
+
+    function close() { menu.hidden = true; active = -1; input.setAttribute('aria-expanded', 'false'); }
+    function highlight(i) {
+      active = i;
+      menu.querySelectorAll('li').forEach((li, k) => li.classList.toggle('is-active', k === i));
+      const li = menu.children[i];
+      if (li) li.scrollIntoView({ block: 'nearest' });
+    }
+    function pick(v) {
+      input.value = v;
+      close();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      if (onPick) onPick(v);
+    }
+    function open(all) {
+      const values = lists[listId] || [];
+      const q = all ? '' : trLower(input.value.trim());
+      items = (q ? values.filter((v) => trLower(v).includes(q)) : values).slice(0, 200);
+      clear(menu);
+      if (!items.length) { close(); return; }
+      for (const v of items) {
+        const li = el('li', { text: v, attrs: { role: 'option' } });
+        li.addEventListener('mousedown', (ev) => { ev.preventDefault(); pick(v); });
+        menu.append(li);
+      }
+      menu.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+      active = -1;
+    }
+    input.addEventListener('focus', () => open(false));
+    input.addEventListener('click', () => { if (menu.hidden) open(false); });
+    input.addEventListener('input', (ev) => { if (ev.isTrusted) open(false); });
+    input.addEventListener('blur', () => setTimeout(close, 120));
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); if (menu.hidden) open(false); else highlight(Math.min(active + 1, items.length - 1)); }
+      else if (ev.key === 'ArrowUp') { ev.preventDefault(); highlight(Math.max(active - 1, 0)); }
+      else if (ev.key === 'Enter' && !menu.hidden && active >= 0) { ev.preventDefault(); ev.stopImmediatePropagation(); pick(items[active]); }
+      else if (ev.key === 'Escape') close();
+    });
+    toggle.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      if (menu.hidden) { input.focus(); open(true); } else close();
+    });
   }
 
   function fillOptions(opts) {
@@ -437,6 +499,8 @@
     state.busy = on;
     for (const id of ['btn-predict', 'btn-replay']) $(id).disabled = on;
     $('btn-apply-filters').disabled = on || !state.current || !state.current.stored;
+    for (const b of document.querySelectorAll('#firms-body [data-exclude]')) b.disabled = on || !(state.current && state.current.stored);
+    updateBulkBar();
     show($('result-progress'), on);
     if (on) show($('result-empty'), false);
   }
@@ -450,6 +514,7 @@
       state.current = view;
       renderResult(view);
       refreshRecent();
+      $('result').scrollIntoView({ behavior: 'smooth', block: 'start' });
     } catch (e) {
       const box = $('result-error');
       box.textContent = (e.status === 400 ? 'Girdi kabul edilmedi: ' : 'Tahmin üretilemedi: ') + e.message
@@ -491,10 +556,17 @@
     runRequest(`/api/predictions/${encodeURIComponent(state.current.prediction_id)}/rerun`, { filters: f.filters });
   }
 
-  function excludeFirm(key, name) {
-    state.excluded.set(key, name || key);
+  function excludeFirms(entries) {
+    if (state.busy || !entries.length) return;
+    for (const [key, name] of entries) state.excluded.set(key, name || key);
     renderExcludedChips();
     rerunWithFilters();
+  }
+
+  function updateBulkBar() {
+    const n = state.marked.size;
+    $('firms-bulk-count').textContent = n ? `${fmtInt.format(n)} firma işaretli` : 'Birden fazla firmayı işaretleyip birlikte çıkarabilirsiniz.';
+    $('btn-exclude-selected').disabled = n === 0 || state.busy || !(state.current && state.current.stored);
   }
 
   async function refreshRecent() {
@@ -614,6 +686,9 @@
     warningList($('firms-warnings'), a.warnings);
     const csv = $('btn-csv');
     show($('firms-excluded'), false);
+    show($('firms-bulk'), false);
+    state.marked.clear();
+    updateBulkBar();
     $('firms-summary').textContent = '';
     if (a.status !== 'ok') {
       show(csv, false);
@@ -637,6 +712,7 @@
       const ol = el('ol', { cls: 'firm-list' });
       for (const e of a.call_list) ol.append(firmRow(view, e, fb.get(e.firma_key)));
       body.append(ol);
+      show($('firms-bulk'), Boolean(view.stored));
     }
 
     const ahead = a.excluded_ahead || [];
@@ -662,8 +738,14 @@
     const snippets = e.snippets || [];
     const li = el('li', { cls: 'firm' });
 
+    const mark = el('input', { attrs: { type: 'checkbox', 'aria-label': `${name} firmasını işaretle`, disabled: !view.stored } });
+    mark.addEventListener('change', () => {
+      if (mark.checked) state.marked.set(e.firma_key, name); else state.marked.delete(e.firma_key);
+      updateBulkBar();
+    });
     li.append(el('div', { cls: 'firm-rank', attrs: { 'aria-label': `Sıra ${e.rank}` } }, String(e.rank),
-      e.rank_original !== e.rank ? el('small', { text: `model ${e.rank_original}` }) : null));
+      e.rank_original !== e.rank ? el('small', { text: `model ${e.rank_original}` }) : null,
+      el('label', { attrs: { title: 'Birlikte listeden çıkarmak için işaretle' } }, mark)));
 
     const main = el('div', { cls: 'firm-main' });
     main.append(el('div', { cls: 'firm-name', text: name }));
@@ -696,8 +778,8 @@
       on: { click: () => toggleNotSuitable(view, e, fbBox, status, error) },
     }));
     actions.append(el('button', {
-      cls: 'btn btn-quiet', text: 'Listeden çıkar', attrs: { type: 'button', disabled: !canAct, title: 'Firmayı dışla ve listeyi yeniden oluştur' },
-      on: { click: () => excludeFirm(e.firma_key, name) },
+      cls: 'btn btn-quiet', text: 'Listeden çıkar', attrs: { type: 'button', disabled: !canAct || state.busy, 'data-exclude': '1', title: 'Firmayı dışla ve listeyi yeniden oluştur' },
+      on: { click: () => excludeFirms([[e.firma_key, name]]) },
     }));
     li.append(actions);
     li.append(fbBox);
@@ -875,6 +957,23 @@
       showLogin('Çıkış yapıldı.');
     });
 
+    $('btn-shutdown').addEventListener('click', async () => {
+      if (!window.confirm('Uygulama tamamen kapatılsın mı? Sunucu durur; yeniden açmak için başlatma komutunu tekrar çalıştırmanız gerekir.')) return;
+      try {
+        await api('POST', '/api/shutdown', {});
+      } catch (e) {
+        toast('Kapatılamadı: ' + e.message);
+        return;
+      }
+      clearInterval(state.statusTimer);
+      state.statusTimer = null;
+      document.body.replaceChildren(el('main', null, el('div', { cls: 'card state-card' },
+        el('h2', { text: 'Uygulama kapatıldı' }),
+        el('p', { cls: 'muted', text: 'Sunucu durduruldu. Bu sekmeyi kapatabilirsiniz. Yeniden kullanmak için başlatma komutunu tekrar çalıştırın.' }))));
+      window.close();
+    });
+    $('btn-exclude-selected').addEventListener('click', () => excludeFirms(Array.from(state.marked.entries())));
+
     $('tab-new').addEventListener('click', () => setTab('new'));
     $('tab-history').addEventListener('click', () => setTab('history'));
     $('pane-new').addEventListener('submit', (ev) => { ev.preventDefault(); predictNew(); });
@@ -882,6 +981,8 @@
     $('btn-replay').addEventListener('click', replayExample);
     $('btn-apply-filters').addEventListener('click', rerunWithFilters);
     $('btn-add-city').addEventListener('click', addCity);
+    $('f-city').removeAttribute('list');
+    attachCombo($('f-city'), 'dl-cities', () => addCity());
     $('f-city').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); addCity(); } });
     $('btn-clear-excluded').addEventListener('click', () => { state.excluded.clear(); renderExcludedChips(); });
     $('f-date').addEventListener('change', () => { if (state.status) renderStatus(state.status); });
@@ -890,6 +991,9 @@
       input.addEventListener('input', () => updatePreview(input));
     }
     for (const input of document.querySelectorAll('#pane-new [data-suggest]')) {
+      const listId = input.getAttribute('list');
+      input.removeAttribute('list');
+      attachCombo(input, listId);
       input.addEventListener('change', () => updateHint(input));
     }
     const marka = document.querySelector('[data-field="Marka"]');
