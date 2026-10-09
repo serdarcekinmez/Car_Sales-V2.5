@@ -8,7 +8,19 @@ hash in the environment (GARAJ_DEMO_PASSWORD_HASH), never in code and never as a
 default. Format (no '$', so .env files and shells need no quoting):
     scrypt:<N>:<r>:<p>:<salt, base64url>:<digest, base64url>
 pipeline/run_demo.py hash-password generates it. verify_password always runs scrypt, also
-for a wrong user name, so the user name cannot be probed by timing.
+for a wrong user name, so the user name cannot be probed by timing. The account signs in
+with its user name or its e-mail address (case-insensitive).
+
+PASSWORD RULES (password_problems; enforced by hash_password, so by hash-password and by a
+reset): at least 12 characters with an upper-case letter, a lower-case letter, a digit and
+a symbol (any character that is not a letter, digit or space, e.g. # ; . , % & ¤ $ £ @;
+'µ' also counts as a symbol). static/app.js mirrors these rules for the on-screen hint.
+
+PASSWORD RESET (PasswordReset). A 6-digit code is e-mailed to the account's address; it
+lives ttl seconds, dies after max_attempts wrong guesses and is kept only as a salted
+SHA-256. A correct code yields a single-use reset token (same ttl) that allows setting a
+new password once. Codes are rate limited (cooldown between codes, a cap per hour). State
+is in memory: a restart cancels a pending reset.
 
 SESSIONS. A login creates a high-entropy random token (cookie, HttpOnly, SameSite=Strict,
 Secure unless local HTTP was explicitly allowed) and a separate CSRF token. Sessions live
@@ -57,7 +69,13 @@ _DIGEST_BYTES = 32
 MIN_PASSWORD_CHARS = 12               # for newly generated hashes
 MAX_PASSWORD_CHARS = 1024
 MAX_USERNAME_CHARS = 64
+MAX_EMAIL_CHARS = 254
+MAX_IDENTIFIER_CHARS = MAX_EMAIL_CHARS  # login / reset field: user name or e-mail
 MAX_TOKEN_CHARS = 128
+EXTRA_SYMBOLS = "µ"                     # Unicode letters that the rules count as symbols
+PASSWORD_RULES_TR = ("Parola en az 12 hanelidir. Büyük harf, küçük harf, rakam ve sembol "
+                     "(# ; . , % & ¤ $ £ µ @ gibi) içermelidir.")
+RESET_CODE_DIGITS = 6
 
 COOKIE_SECURE = "__Host-garaj_demo"   # __Host-: Secure, Path=/, no Domain
 COOKIE_LOCAL = "garaj_demo"           # explicit local-HTTP mode only
@@ -87,14 +105,32 @@ def _scrypt(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
                           maxmem=_SCRYPT_MAXMEM, dklen=_DIGEST_BYTES)
 
 
-def hash_password(password: str, *, n: int = DEFAULT_SCRYPT_N, r: int = DEFAULT_SCRYPT_R,
-                  p: int = DEFAULT_SCRYPT_P) -> str:
-    """A new salted scrypt hash in the documented format."""
+def password_problems(password: str) -> list[str]:
+    """The unmet password rules, in Turkish ('büyük harf', ...); empty = acceptable."""
     if not isinstance(password, str):
         raise TypeError("password must be a string")
-    if not MIN_PASSWORD_CHARS <= len(password) <= MAX_PASSWORD_CHARS:
-        raise ValueError(f"password must have {MIN_PASSWORD_CHARS}..{MAX_PASSWORD_CHARS} "
-                         "characters")
+    missing = []
+    if len(password) < MIN_PASSWORD_CHARS:
+        missing.append(f"en az {MIN_PASSWORD_CHARS} karakter")
+    if len(password) > MAX_PASSWORD_CHARS:
+        missing.append(f"en fazla {MAX_PASSWORD_CHARS} karakter")
+    if not any(c.isupper() and c.isalpha() for c in password):
+        missing.append("büyük harf")
+    if not any(c.islower() and c.isalpha() and c not in EXTRA_SYMBOLS for c in password):
+        missing.append("küçük harf")
+    if not any(c.isdecimal() for c in password):
+        missing.append("rakam")
+    if not any(c in EXTRA_SYMBOLS or not (c.isalnum() or c.isspace()) for c in password):
+        missing.append("sembol")
+    return missing
+
+
+def hash_password(password: str, *, n: int = DEFAULT_SCRYPT_N, r: int = DEFAULT_SCRYPT_R,
+                  p: int = DEFAULT_SCRYPT_P) -> str:
+    """A new salted scrypt hash in the documented format; the password rules must hold."""
+    missing = password_problems(password)
+    if missing:
+        raise ValueError(f"{PASSWORD_RULES_TR} Eksik: {', '.join(missing)}.")
     salt = secrets.token_bytes(_SALT_BYTES)
     encoded = f"{HASH_SCHEME}:{n}:{r}:{p}:{_b64(salt)}:{_b64(_scrypt(password, salt, n, r, p))}"
     parse_password_hash(encoded)                    # the parameters must be accepted back
@@ -130,14 +166,22 @@ def verify_password(password, encoded: str) -> bool:
     return hmac.compare_digest(candidate, digest) and valid
 
 
-def check_credentials(username, password, *, expected_username: str,
-                      password_hash: str) -> bool:
-    """Both must match. The password is always hashed, whatever the user name."""
+def identifier_matches(identifier, *, expected_username: str, expected_email: str = "") -> bool:
+    """identifier is the account's user name (exact) or e-mail (case-insensitive)."""
+    ident = identifier.strip() if isinstance(identifier, str) \
+        and len(identifier) <= MAX_IDENTIFIER_CHARS else ""
+    user_ok = hmac.compare_digest(ident.encode("utf-8"), expected_username.encode("utf-8"))
+    mail_ok = bool(expected_email) and hmac.compare_digest(
+        ident.lower().encode("utf-8"), expected_email.lower().encode("utf-8"))
+    return user_ok or mail_ok
+
+
+def check_credentials(identifier, password, *, expected_username: str, password_hash: str,
+                      expected_email: str = "") -> bool:
+    """Both must match. The password is always hashed, whatever the identifier."""
     pw_ok = verify_password(password, password_hash)
-    user = username if isinstance(username, str) and len(username) <= MAX_USERNAME_CHARS \
-        else ""
-    user_ok = hmac.compare_digest(user.encode("utf-8"), expected_username.encode("utf-8"))
-    return pw_ok and user_ok
+    return identifier_matches(identifier, expected_username=expected_username,
+                              expected_email=expected_email) and pw_ok
 
 
 # ----------------------------------------------------------------------------
@@ -201,6 +245,11 @@ class SessionStore:
             with self._lock:
                 self._sessions.pop(_token_key(token), None)
 
+    def revoke_all(self) -> None:
+        """Sign every browser out (after a password change)."""
+        with self._lock:
+            self._sessions.clear()
+
 
 def csrf_ok(session: Session, header_value) -> bool:
     return isinstance(header_value, str) and 0 < len(header_value) <= MAX_TOKEN_CHARS \
@@ -258,6 +307,83 @@ class LoginThrottle:
     def success(self, client: str) -> None:
         with self._lock:
             self._failures.pop(client, None)
+
+
+# ----------------------------------------------------------------------------
+# Password reset by e-mailed code.
+# ----------------------------------------------------------------------------
+def _digest(salt: bytes, secret: str) -> bytes:
+    return hashlib.sha256(salt + secret.encode("utf-8")).digest()
+
+
+class PasswordReset:
+    """One account's pending reset code and the token a correct code unlocks."""
+
+    def __init__(self, *, ttl_seconds: float = 600.0, max_attempts: int = 5,
+                 cooldown_seconds: float = 60.0, max_per_hour: int = 5, clock=time.monotonic):
+        self.ttl_seconds = float(ttl_seconds)
+        self._max_attempts = int(max_attempts)
+        self._cooldown = float(cooldown_seconds)
+        self._max_per_hour = int(max_per_hour)
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._sent: deque = deque()
+        self._code = None                   # [salt, digest, expires_at, attempts_left]
+        self._token = None                  # (salt, digest, expires_at)
+
+    def issue(self) -> str | None:
+        """A new code (any earlier code and token stop working), or None when rate limited."""
+        with self._lock:
+            now = self._clock()
+            while self._sent and self._sent[0] <= now - 3600:
+                self._sent.popleft()
+            if self._sent and now - self._sent[-1] < self._cooldown \
+                    or len(self._sent) >= self._max_per_hour:
+                return None
+            code = f"{secrets.randbelow(10 ** RESET_CODE_DIGITS):0{RESET_CODE_DIGITS}d}"
+            salt = secrets.token_bytes(_SALT_BYTES)
+            self._code = [salt, _digest(salt, code), now + self.ttl_seconds,
+                          self._max_attempts]
+            self._token = None
+            self._sent.append(now)
+            return code
+
+    def verify(self, code) -> str | None:
+        """The reset token for a correct, live code (the code is then used up); None
+        otherwise. Each wrong guess uses one attempt; the last one kills the code."""
+        if not isinstance(code, str) or len(code) != RESET_CODE_DIGITS \
+                or not code.isascii() or not code.isdigit():
+            return None
+        with self._lock:
+            now = self._clock()
+            pending = self._code
+            if pending is None or pending[2] <= now:
+                self._code = None
+                return None
+            if not hmac.compare_digest(_digest(pending[0], code), pending[1]):
+                pending[3] -= 1
+                if pending[3] <= 0:
+                    self._code = None
+                return None
+            self._code = None
+            token = secrets.token_urlsafe(32)
+            salt = secrets.token_bytes(_SALT_BYTES)
+            self._token = (salt, _digest(salt, token), now + self.ttl_seconds)
+            return token
+
+    def consume_token(self, token) -> bool:
+        """True once for the live token from verify(); it cannot be used again."""
+        if not isinstance(token, str) or not 0 < len(token) <= MAX_TOKEN_CHARS:
+            return False
+        with self._lock:
+            pending = self._token
+            if pending is None or pending[2] <= self._clock():
+                self._token = None
+                return False
+            if not hmac.compare_digest(_digest(pending[0], token), pending[1]):
+                return False
+            self._token = None
+            return True
 
 
 def normalize_ip(text: str) -> str | None:

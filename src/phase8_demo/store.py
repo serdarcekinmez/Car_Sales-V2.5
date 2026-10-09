@@ -17,6 +17,11 @@ transaction, never taken from the client. A firm verdict is accepted only for a 
 caller validated against that prediction's shown call list (app.py). The number of
 feedback rows per prediction is bounded.
 
+ACCOUNT PASSWORD. A password reset saves the new password hash per owner, together with
+the SHA-256 of the configured (.env) hash it replaced (base_sha256). app.Account uses the
+saved hash only while that configured hash is unchanged, so a new hash-password line in
+.env always wins. Only salted scrypt hashes are stored, never a password.
+
 OWNERSHIP. Every read and write filters on owner: another account's prediction is
 reported as not found (no existence oracle).
 
@@ -30,6 +35,8 @@ PUBLIC API
   list_predictions(owner, limit)                -> list[dict]
   add_feedback(prediction_id, owner, **fields)  -> dict
   feedback_for(prediction_id, owner)            -> list[dict]
+  get_password_hash(owner, base_sha256)         -> str | None
+  save_password_hash(owner, password_hash, base_sha256)
 """
 from __future__ import annotations
 
@@ -42,7 +49,8 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCHEMA_VERSION = "phase8-store-v1"
+SCHEMA_VERSION = "phase8-store-v2"
+_UPGRADABLE = ("phase8-store-v1",)              # v2 only added account_password
 MAX_FEEDBACK_PER_PREDICTION = 400
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MODES = ("current", "historical_replay")
@@ -105,6 +113,12 @@ CREATE TRIGGER IF NOT EXISTS feedback_no_update BEFORE UPDATE ON feedback
 BEGIN SELECT RAISE(ABORT, 'feedback is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS feedback_no_delete BEFORE DELETE ON feedback
 BEGIN SELECT RAISE(ABORT, 'feedback is append-only'); END;
+CREATE TABLE IF NOT EXISTS account_password (
+    owner          TEXT PRIMARY KEY,
+    password_hash  TEXT NOT NULL,
+    base_sha256    TEXT NOT NULL CHECK (length(base_sha256) = 64),
+    updated_at_utc TEXT NOT NULL
+);
 """
 
 _FEEDBACK_COLUMNS = ("feedback_id", "prediction_id", "created_at_utc", "kind", "firma_key",
@@ -159,6 +173,9 @@ class Store:
                 row = conn.execute("SELECT value FROM meta WHERE key = 'schema'").fetchone()
                 if row is None:
                     conn.execute("INSERT INTO meta (key, value) VALUES ('schema', ?)",
+                                 (SCHEMA_VERSION,))
+                elif row["value"] in _UPGRADABLE:
+                    conn.execute("UPDATE meta SET value = ? WHERE key = 'schema'",
                                  (SCHEMA_VERSION,))
                 elif row["value"] != SCHEMA_VERSION:
                     raise StoreError(f"store schema {row['value']!r} is not {SCHEMA_VERSION!r}")
@@ -261,3 +278,21 @@ class Store:
                 "WHERE prediction_id = ? AND owner = ? ORDER BY feedback_id",
                 (prediction_id, owner)).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------ account password
+    def get_password_hash(self, owner: str, base_sha256: str) -> str | None:
+        """The saved hash, only if it replaced the configured hash with this SHA-256."""
+        with closing(self._connect()) as conn:
+            row = conn.execute("SELECT password_hash FROM account_password "
+                               "WHERE owner = ? AND base_sha256 = ?",
+                               (owner, base_sha256)).fetchone()
+        return None if row is None else row["password_hash"]
+
+    def save_password_hash(self, owner: str, password_hash: str, base_sha256: str) -> None:
+        with self._lock, closing(self._connect()) as conn, conn:
+            conn.execute(
+                "INSERT INTO account_password (owner, password_hash, base_sha256, "
+                "updated_at_utc) VALUES (?, ?, ?, ?) ON CONFLICT (owner) DO UPDATE SET "
+                "password_hash = excluded.password_hash, base_sha256 = excluded.base_sha256, "
+                "updated_at_utc = excluded.updated_at_utc",
+                (owner, password_hash, base_sha256, _now()))

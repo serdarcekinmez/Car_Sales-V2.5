@@ -116,6 +116,39 @@ main { padding: 1rem 1.25rem 2rem; max-width: 1560px; margin: 0 auto; }
 .login-wrap { display: flex; justify-content: center; padding-top: 8vh; }
 .login-card { width: 100%; max-width: 380px; }
 .login-title { font-size: 1.35rem; }
+.login-card .field { margin-bottom: 0.7rem; }
+.login-card .btn-block { margin-top: 0.2rem; }
+.login-links { display: flex; justify-content: space-between; gap: 0.75rem; margin: 0.7rem 0 0; }
+.link-btn {
+  appearance: none; background: none; border: 0; padding: 0; font: inherit; font-size: 0.86rem;
+  color: var(--teal-dark); text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.link-btn:hover:not(:disabled) { color: var(--teal); }
+.link-btn:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+.link-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 3px; }
+.form-ok { background: var(--teal-soft); border: 1px solid #b7dcd5; color: var(--teal-dark); border-radius: 7px; padding: 0.45rem 0.6rem; font-size: 0.86rem; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; padding: 0; margin: -1px; }
+
+/* Password field with show / hide (eye) button and the rules warning */
+.pw-box { position: relative; }
+.pw-box input { padding-right: 2.4rem; }
+.pw-toggle {
+  position: absolute; right: 1px; top: 1px; bottom: 1px; width: 2.2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  appearance: none; border: 0; background: transparent; color: var(--muted);
+  cursor: pointer; border-radius: 0 6px 6px 0;
+}
+.pw-toggle:hover { color: var(--teal-dark); background: var(--teal-soft); }
+.pw-toggle:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.pw-toggle svg { width: 18px; height: 18px; }
+.pw-rules {
+  display: flex; gap: 0.35rem; align-items: flex-start; margin: 0.15rem 0 0;
+  font-size: 0.78rem; line-height: 1.35; color: #b42318; font-weight: 600;
+}
+.pw-rules::before { content: "!"; flex: none; display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; margin-top: 0.05rem; border-radius: 50%; background: #b42318; color: #fff; font-size: 0.7rem; font-weight: 800; }
+.pw-rules.is-ok { color: var(--teal-dark); }
+.pw-rules.is-ok::before { content: "✓"; background: var(--teal); }
+.code-input { letter-spacing: 0.5em; font-size: 1.25rem !important; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* Tabs */
 .tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--line); margin: -0.25rem 0 0.9rem; }

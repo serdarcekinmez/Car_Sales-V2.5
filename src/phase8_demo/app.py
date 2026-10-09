@@ -41,13 +41,22 @@ create_app an on_shutdown callback; the signed-in user can then stop the whole s
 the page ("Oturumu kapat", POST /api/shutdown). Without the callback the route answers 404,
 so a public deployment can never be stopped from the browser.
 
-ACCESS. Every /api route except /api/login and /api/session requires a session; every
-mutating route requires CSRF + JSON + allowed Origin (security.py). Predictions, CSV and
-feedback are filtered by owner (the configured account) in the store. One account serves
-one customer; separate customers need separate deployments.
+ACCESS. Every /api route except /api/login, /api/session and /api/password-reset/*
+requires a session; every mutating route requires CSRF + JSON + allowed Origin
+(security.py). Predictions, CSV and feedback are filtered by owner (the configured account)
+in the store. One account serves one customer; separate customers need separate
+deployments. The account signs in with its user name or its e-mail (GARAJ_DEMO_EMAIL).
+
+PASSWORD RESET ("Parolamı unuttum"). Only when GARAJ_DEMO_EMAIL and a mailer (mailer.py)
+are configured. /request e-mails a 6-digit code when the identifier names the account (the
+answer is the same either way, and sending runs in the background); /verify exchanges a
+correct code for a reset token; /complete sets the new password (rules in security.py,
+typed twice), saves its hash in the store (Account), signs every browser out and e-mails a
+notice. Requests and wrong codes are throttled per client like logins.
 
 PUBLIC API
-  DemoSettings, settings_from_env(environ, ...), create_app(settings, on_shutdown=None)
+  DemoSettings, settings_from_env(environ, ...),
+  create_app(settings, on_shutdown=None, mailer=None), Account
   serving_code_sha256(), client_view(response, ...)
 """
 from __future__ import annotations
@@ -77,6 +86,7 @@ from phase7_inference import filters as FL
 from phase7_inference import predict as PR
 from phase7_inference.vehicle_input import KEY_SEPARATOR, RAW_COLUMNS
 from phase8_demo import security as SEC
+from phase8_demo.mailer import valid_address
 from phase8_demo.store import PredictionRecord, Store, StoreError
 
 log = logging.getLogger(__name__)
@@ -86,7 +96,8 @@ _PKG = Path(__file__).resolve().parent
 _SRC = _PKG.parent
 _REPO = _SRC.parent
 SERVING_FILES = ("phase8_demo/__init__.py", "phase8_demo/app.py", "phase8_demo/store.py",
-                 "phase8_demo/security.py", "phase8_demo/static/index.html",
+                 "phase8_demo/security.py", "phase8_demo/mailer.py",
+                 "phase8_demo/static/index.html",
                  "phase8_demo/static/app.js", "phase8_demo/static/style.css")
 RUNNER_FILE = "pipeline/run_demo.py"
 PAGES = {"/": ("index.html", "text/html; charset=utf-8"),
@@ -105,6 +116,8 @@ MAX_CITY_CHARS = 80
 PREDICT_LOCK_TIMEOUT_S = 120
 LOGIN_CONCURRENCY = 2                   # simultaneous scrypt password checks per process
 LOGIN_BUSY_RETRY_S = 5
+RESET_SENT_TR = ("Bu bilgilere kayıtlı bir hesap varsa, hesabın e-posta adresine 6 haneli bir "
+                 "kod gönderildi. Kod 10 dakika geçerlidir.")
 EXAMPLE_COUNT = 60
 EXAMPLE_DAYS = 180
 EXAMPLE_SEED = 20261004
@@ -157,6 +170,7 @@ class DemoSettings:
     store_path: Path                    # writable SQLite file
     username: str
     password_hash: str                  # security.hash_password format
+    email: str = ""                     # sign-in alternative; password-reset address
     secure_cookies: bool = True
     allowed_hosts: frozenset = LOCAL_HOSTS
     trusted_proxies: frozenset = frozenset()
@@ -172,6 +186,8 @@ class DemoSettings:
             SEC.parse_password_hash(self.password_hash)
         except ValueError as exc:
             raise ConfigError(f"GARAJ_DEMO_PASSWORD_HASH is invalid: {exc}") from None
+        if self.email and not valid_address(self.email):
+            raise ConfigError("GARAJ_DEMO_EMAIL must be an e-mail address (or empty)")
         if not Path(self.root).is_dir():
             raise ConfigError("the data root (GARAJ_DEMO_ROOT / --root) is not a directory")
         if not 0.25 <= float(self.session_hours) <= 24:
@@ -210,10 +226,48 @@ def settings_from_env(environ, *, root=None, store_path=None, secure_cookies: bo
         raise ConfigError("GARAJ_DEMO_SESSION_HOURS must be a number") from None
     settings = DemoSettings(root=root, store_path=store, username=username,
                             password_hash=password_hash.strip(),
+                            email=environ.get("GARAJ_DEMO_EMAIL", "").strip(),
                             secure_cookies=secure_cookies, allowed_hosts=hosts,
                             trusted_proxies=frozenset(proxies), session_hours=hours)
     settings.validate()
     return settings
+
+
+class Account:
+    """The pilot account. Its password hash is the configured one (GARAJ_DEMO_PASSWORD_HASH)
+    until a password reset saves a newer one in the store; the saved hash is used only
+    while the configured hash is still the one it replaced (see store.py)."""
+
+    def __init__(self, username: str, email: str, configured_hash: str, store: Store):
+        self.username, self.email = username, email
+        self._store = store
+        self._base = hashlib.sha256(configured_hash.encode("utf-8")).hexdigest()
+        self._lock = threading.Lock()
+        self._hash = configured_hash
+        saved = store.get_password_hash(username, self._base)
+        if saved is not None:
+            try:
+                SEC.parse_password_hash(saved)
+                self._hash = saved
+            except ValueError:
+                log.warning("phase8 demo: ignoring an invalid saved password hash")
+
+    def matches(self, identifier) -> bool:
+        return SEC.identifier_matches(identifier, expected_username=self.username,
+                                      expected_email=self.email)
+
+    def check(self, identifier, password) -> bool:
+        with self._lock:
+            encoded = self._hash
+        return SEC.check_credentials(identifier, password, expected_username=self.username,
+                                     expected_email=self.email, password_hash=encoded)
+
+    def set_password(self, password: str) -> None:
+        """Hash (rules enforced: ValueError), save, and use from now on."""
+        encoded = SEC.hash_password(password)
+        self._store.save_password_hash(self.username, encoded, self._base)
+        with self._lock:
+            self._hash = encoded
 
 
 def serving_code_sha256() -> str:
@@ -701,9 +755,11 @@ def _load_pages() -> dict:
     return pages
 
 
-def create_app(settings: DemoSettings, *, on_shutdown=None):
+def create_app(settings: DemoSettings, *, on_shutdown=None, mailer=None):
     """The ASGI application (FastAPI wrapped in GuardMiddleware). See module docstring.
-    on_shutdown: optional zero-argument callable that stops the server (local runs only)."""
+    on_shutdown: optional zero-argument callable that stops the server (local runs only).
+    mailer: optional object with send(to, subject, body) (mailer.py); with it and
+    settings.email the password reset is available."""
     if not isinstance(settings, DemoSettings):
         raise TypeError("settings must be DemoSettings")
     settings.validate()
@@ -717,6 +773,11 @@ def create_app(settings: DemoSettings, *, on_shutdown=None):
     rt = DemoRuntime(settings, store, serving)
     sessions = SEC.SessionStore(settings.session_hours * 3600)
     throttle = SEC.LoginThrottle()
+    account = Account(settings.username, settings.email, settings.password_hash, store)
+    resets = SEC.PasswordReset()
+    reset_enabled = mailer is not None and bool(settings.email)
+    reset_requests = SEC.LoginThrottle(max_failures=5, window_seconds=900.0)
+    reset_failures = SEC.LoginThrottle(max_failures=10, window_seconds=900.0)
     password_slots = threading.BoundedSemaphore(LOGIN_CONCURRENCY)
     cookie =SEC.COOKIE_SECURE if settings.secure_cookies else SEC.COOKIE_LOCAL
 
@@ -752,6 +813,28 @@ def create_app(settings: DemoSettings, *, on_shutdown=None):
                 raise ApiError(403, "csrf", "Güvenlik belirteci geçersiz; sayfayı yenileyin.")
         return session
 
+    def client_of(request: Request) -> str:
+        return SEC.client_ip(request.client.host if request.client else None,
+                             request.headers.get("x-forwarded-for"), settings.trusted_proxies)
+
+    def refuse_if_throttled(limiter: SEC.LoginThrottle, client: str) -> None:
+        wait = limiter.retry_after(client)
+        if wait:
+            raise ApiError(429, "too_many_attempts",
+                           f"Çok fazla hatalı deneme; {math.ceil(wait / 60)} dakika sonra "
+                           f"tekrar deneyin.", headers={"Retry-After": str(wait)})
+
+    def send_mail_later(subject: str, body: str) -> None:
+        """Send in the background: the answer must not reveal (by error or by timing)
+        whether an e-mail went out. Failures are only logged."""
+        def run():
+            try:
+                mailer.send(settings.email, subject, body)
+            except Exception as exc:                    # noqa: BLE001 — logged, not shown
+                log.error("phase8 demo: e-mail could not be sent (%s: %s)",
+                          type(exc).__name__, exc)
+        threading.Thread(target=run, name="phase8-mail", daemon=True).start()
+
     def check_origin(request: Request) -> None:
         if not SEC.origin_allowed(request.headers.get("origin"), settings.allowed_hosts):
             raise ApiError(403, "origin", "İstek kaynağı kabul edilmedi.")
@@ -786,9 +869,7 @@ def create_app(settings: DemoSettings, *, on_shutdown=None):
         if not password_slots.acquire(blocking=False):
             return None
         try:
-            return SEC.check_credentials(username, password,
-                                         expected_username=settings.username,
-                                         password_hash=settings.password_hash)
+            return account.check(username, password)
         finally:
             password_slots.release()
 
@@ -816,7 +897,7 @@ def create_app(settings: DemoSettings, *, on_shutdown=None):
     def get_session(request: Request):
         session = sessions.get(request.cookies.get(cookie))
         if session is None:
-            return {"authenticated": False}
+            return {"authenticated": False, "reset_enabled": reset_enabled}
         return {"authenticated": True, "username": session.username,
                 "csrf_token": session.csrf_token, "can_shutdown": on_shutdown is not None}
 
@@ -825,14 +906,8 @@ def create_app(settings: DemoSettings, *, on_shutdown=None):
         check_origin(request)
         body = await json_body(request)
         _keys(body, {"username", "password"}, "Giriş")
-        client = SEC.client_ip(request.client.host if request.client else None,
-                               request.headers.get("x-forwarded-for"),
-                               settings.trusted_proxies)
-        wait = throttle.retry_after(client)
-        if wait:
-            raise ApiError(429, "too_many_attempts",
-                           f"Çok fazla hatalı deneme; {math.ceil(wait / 60)} dakika sonra "
-                           f"tekrar deneyin.", headers={"Retry-After": str(wait)})
+        client = client_of(request)
+        refuse_if_throttled(throttle, client)
         ok = await run_in_threadpool(verify_login, body.get("username"), body.get("password"))
         if ok is None:
             raise ApiError(429, "login_busy", "Şu anda çok sayıda giriş denemesi var; birkaç "
@@ -851,6 +926,86 @@ def create_app(settings: DemoSettings, *, on_shutdown=None):
                              "can_shutdown": on_shutdown is not None})
         resp.set_cookie(cookie, token, max_age=int(sessions.ttl_seconds), path="/",
                         secure=settings.secure_cookies, httponly=True, samesite="strict")
+        return resp
+
+    # ------------------------------------------------------------ password reset
+    def require_reset_enabled() -> None:
+        if not reset_enabled:
+            raise ApiError(503, "reset_disabled", "Parola sıfırlama bu kurulumda kapalı: "
+                                                  "e-posta ayarları yapılmamış. Yöneticinize "
+                                                  "başvurun.")
+
+    @api.post("/api/password-reset/request")
+    async def reset_request(request: Request):
+        check_origin(request)
+        body = await json_body(request)
+        _keys(body, {"identifier"}, "Parola sıfırlama")
+        require_reset_enabled()
+        client = client_of(request)
+        refuse_if_throttled(reset_requests, client)
+        reset_requests.failure(client)                  # every request counts
+        if account.matches(body.get("identifier")):
+            code = resets.issue()
+            if code is not None:
+                log.info("phase8 demo: password-reset code issued (client %s)", client)
+                send_mail_later(
+                    "Garaj parola sıfırlama kodu",
+                    f"Merhaba,\n\nGaraj çalışma alanı parola sıfırlama kodunuz: {code}\n\n"
+                    "Kod 10 dakika geçerlidir ve yalnızca bir kez kullanılabilir.\n"
+                    "Bu isteği siz yapmadıysanız bu e-postayı dikkate almayın; parolanız "
+                    "değişmez.\n")
+        else:
+            log.info("phase8 demo: password-reset request for an unknown identifier "
+                     "(client %s)", client)
+        return {"sent": True, "message": RESET_SENT_TR}
+
+    @api.post("/api/password-reset/verify")
+    async def reset_verify(request: Request):
+        check_origin(request)
+        body = await json_body(request)
+        _keys(body, {"code"}, "Kod doğrulama")
+        require_reset_enabled()
+        client = client_of(request)
+        refuse_if_throttled(reset_failures, client)
+        code = body.get("code")
+        token = resets.verify(code.strip() if isinstance(code, str) else code)
+        if token is None:
+            reset_failures.failure(client)
+            log.warning("phase8 demo: wrong or expired reset code from %s", client)
+            raise ApiError(400, "invalid_code", "Kod hatalı ya da süresi dolmuş. Tekrar "
+                                                "deneyin veya yeni bir kod isteyin.")
+        return {"reset_token": token}
+
+    @api.post("/api/password-reset/complete")
+    async def reset_complete(request: Request):
+        check_origin(request)
+        body = await json_body(request)
+        _keys(body, {"reset_token", "password", "password_confirm"}, "Yeni parola")
+        require_reset_enabled()
+        client = client_of(request)
+        password, confirm = body.get("password"), body.get("password_confirm")
+        if not isinstance(password, str) or not isinstance(confirm, str):
+            raise ApiError(400, "invalid_field", "Yeni parola iki kez yazılmalı.")
+        if password != confirm:
+            raise ApiError(400, "password_mismatch", "Yazdığınız iki parola aynı değil.")
+        missing = SEC.password_problems(password)
+        if missing:
+            raise ApiError(400, "weak_password", f"{SEC.PASSWORD_RULES_TR} Eksik: "
+                                                 f"{', '.join(missing)}.")
+        if not resets.consume_token(body.get("reset_token")):
+            raise ApiError(400, "reset_expired", "Parola sıfırlama süresi doldu. Lütfen "
+                                                 "yeni bir kod isteyin.")
+        await run_in_threadpool(account.set_password, password)
+        sessions.revoke_all()
+        throttle.success(client)
+        log.info("phase8 demo: password changed by reset (client %s)", client)
+        send_mail_later("Garaj parolanız değiştirildi",
+                        "Merhaba,\n\nGaraj çalışma alanı parolanız az önce değiştirildi. "
+                        "Açık olan tüm oturumlar kapatıldı.\n\nBu değişikliği siz "
+                        "yapmadıysanız hemen yöneticinize haber verin.\n")
+        resp = JSONResponse({"changed": True})
+        resp.delete_cookie(cookie, path="/", secure=settings.secure_cookies, httponly=True,
+                           samesite="strict")
         return resp
 
     @api.post("/api/logout")

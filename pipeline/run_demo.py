@@ -3,7 +3,8 @@
 run_demo.py  —  Phase 8: start the private customer demo, or create its password hash.
 
   python pipeline/run_demo.py hash-password
-      Asks twice for the pilot password (not echoed, at least 12 characters) and prints
+      Asks twice for the pilot password (not echoed; at least 12 characters with upper-
+      and lower-case letters, a digit and a symbol: security.password_problems) and prints
       the GARAJ_DEMO_PASSWORD_HASH=... line to paste into .env. Nothing else happens.
 
   python pipeline/run_demo.py serve [--root DIR] [--store FILE] [--host H] [--port P]
@@ -26,6 +27,10 @@ HOST RULES
     server from the page (the terminal / command window then returns or closes). It is
     refused on any non-loopback host, so a public deployment cannot be stopped remotely.
   * --open-browser opens http://127.0.0.1:PORT in the default browser once the server runs.
+  * --mail-to-console writes password-reset e-mails (with the code) to this terminal
+    instead of sending them, for trying the reset without an SMTP account. It is refused
+    on any non-loopback host. Otherwise e-mail goes through GARAJ_DEMO_SMTP_* (mailer.py);
+    without GARAJ_DEMO_SMTP_HOST or GARAJ_DEMO_EMAIL the password reset is off.
 """
 from __future__ import annotations
 
@@ -58,8 +63,8 @@ def _fail(message: str) -> int:
 def cmd_hash_password(_args) -> int:
     from phase8_demo import security
 
-    password = getpass.getpass(f"Pilot parolası (en az {security.MIN_PASSWORD_CHARS} "
-                               f"karakter): ")
+    print(security.PASSWORD_RULES_TR)
+    password = getpass.getpass("Pilot parolası: ")
     again = getpass.getpass("Parola tekrar: ")
     if password != again:
         return _fail("parolalar eşleşmiyor")
@@ -84,14 +89,22 @@ def cmd_serve(args) -> int:
     allowed = args.allowed_host or None
     if args.allow_shutdown and not loopback:
         return _fail("--allow-shutdown is only allowed on a loopback host")
+    if args.mail_to_console and not loopback:
+        return _fail("--mail-to-console is only allowed on a loopback host")
     if args.behind_https and allowed is None \
             and not os.environ.get("GARAJ_DEMO_ALLOWED_HOSTS", "").strip():
         return _fail("--behind-https needs the public host name: --allowed-host NAME or "
                      "GARAJ_DEMO_ALLOWED_HOSTS")
 
     from phase8_demo.app import ConfigError, create_app, settings_from_env
+    from phase8_demo.mailer import ConsoleMailer, SmtpMailer
 
     import uvicorn
+
+    try:
+        mailer = ConsoleMailer() if args.mail_to_console else SmtpMailer.from_env(os.environ)
+    except ValueError as exc:
+        return _fail(str(exc))
 
     server: uvicorn.Server | None = None
 
@@ -103,7 +116,8 @@ def cmd_serve(args) -> int:
         settings = settings_from_env(os.environ, root=args.root, store_path=args.store,
                                      secure_cookies=not args.insecure_local_http,
                                      allowed_hosts=allowed)
-        app = create_app(settings, on_shutdown=stop_server if args.allow_shutdown else None)
+        app = create_app(settings, on_shutdown=stop_server if args.allow_shutdown else None,
+                         mailer=mailer)
     except ConfigError as exc:
         return _fail(str(exc))
 
@@ -114,6 +128,11 @@ def cmd_serve(args) -> int:
     if loopback and settings.secure_cookies and not args.behind_https:
         log.warning("cookies are Secure: open the app through HTTPS, or restart with "
                     "--insecure-local-http for plain http://127.0.0.1:%d", args.port)
+    if mailer is None or not settings.email:
+        log.info("password reset is off (needs GARAJ_DEMO_EMAIL and GARAJ_DEMO_SMTP_HOST, "
+                 "or --mail-to-console)")
+    elif args.mail_to_console:
+        log.warning("--mail-to-console: password-reset codes are printed here, not e-mailed")
     config = uvicorn.Config(app, host=args.host, port=args.port, workers=1,
                             proxy_headers=False, server_header=False, access_log=True,
                             log_level="info", timeout_keep_alive=5, limit_concurrency=64)
@@ -151,8 +170,15 @@ def main(argv=None) -> int:
                             "loopback host only")
     serve.add_argument("--open-browser", action="store_true",
                        help="open the page in the default browser after start")
+    serve.add_argument("--mail-to-console", action="store_true",
+                       help="print password-reset e-mails here instead of sending them; "
+                            "loopback host only")
     args = parser.parse_args(argv)
 
+    # A Windows console may not encode Turkish letters (cp1252): never lose a log line.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if str(SRC) not in sys.path:

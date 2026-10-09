@@ -48,7 +48,7 @@ python3.10 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-demo.txt
 
-# 2) Parola özeti üret (parola ekrana yazılmaz; en az 12 karakter)
+# 2) Parola özeti üret (parola ekrana yazılmaz; en az 12 karakter, büyük/küçük harf, rakam, sembol)
 python pipeline/run_demo.py hash-password
 #    Çıktı: GARAJ_DEMO_PASSWORD_HASH=scrypt:16384:8:1:...
 
@@ -81,6 +81,18 @@ Betikler `.env` dosyasını yükler, sunucuyu `--insecure-local-http --allow-shu
 - **Oturumu kapat:** Onay sorulur, ardından sunucu tamamen durur. Komut penceresi (Windows) ya da betiğin açtığı terminal kendiliğinden kapanır. Yeniden kullanmak için betik tekrar çalıştırılır.
 
 `--allow-shutdown` yalnızca bu bilgisayardan erişilen adreste (127.0.0.1) kabul edilir. Docker / HTTPS yayınında bu düğme hiç görünmez ve `/api/shutdown` 404 döner. Böylece uzaktaki bir kullanıcı sunucuyu kapatamaz.
+
+### Giriş, parola kuralları ve "Parolamı unuttum"
+
+- **Giriş:** Kullanıcı adı (`GARAJ_DEMO_USERNAME`) ya da e-posta adresi (`GARAJ_DEMO_EMAIL`, büyük/küçük harf fark etmez) ile yapılır. Parola kutusunun yanındaki göz düğmesi yazılan parolayı gösterir ya da gizler.
+- **Parola kuralı:** En az 12 karakter; büyük harf, küçük harf, rakam ve sembol (`# ; . , % & ¤ $ £ µ @` gibi; harf, rakam ya da boşluk olmayan her karakter) içermelidir. Kural, parola kutusunun altında kırmızı uyarı olarak görünür; kural sağlanınca yeşile döner. `hash-password` komutu ve parola sıfırlama, kurala uymayan parolayı kabul etmez.
+- **Parolamı unuttum:**
+  1. Giriş ekranındaki bağlantıya tıklanır, kullanıcı adı ya da e-posta yazılır.
+  2. Hesabın e-posta adresine 6 haneli bir kod gider. Kod 10 dakika geçerlidir, 5 yanlış denemede geçersiz olur. En fazla dakikada bir, saatte beş kod gönderilir.
+  3. Kod onaylanınca yeni parola iki kez yazılır. Yeni parolanın özeti kayıt deposuna (`demo.sqlite3`) yazılır, açık oturumların hepsi kapanır ve hesaba "parolanız değiştirildi" e-postası gider.
+- **E-posta ayarları:** `.env` içinde `GARAJ_DEMO_EMAIL` ve `GARAJ_DEMO_SMTP_*` satırları doldurulur (örnek: `.env.example`). Gmail için normal parola değil, Google hesabında oluşturulan bir "uygulama şifresi" gerekir. Bu ayarlar boşsa parola sıfırlama kapalıdır ve ekranda bunu söyleyen bir not görünür.
+- **E-posta olmadan deneme:** `baslat.bat --mail-to-console` ile başlatılırsa kod e-postayla gönderilmez, komut penceresine yazılır. Bu seçenek yalnızca 127.0.0.1'de kabul edilir.
+- **Öncelik:** Sıfırlamayla kaydedilen parola, `.env` içindeki özet değişmediği sürece geçerlidir. `.env` içine `hash-password` ile yeni bir özet yapıştırılırsa o özet kullanılır.
 
 ### Birden fazla firmayı listeden çıkarma
 

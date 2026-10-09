@@ -29,19 +29,82 @@
 
   <!-- Login -->
   <section class="login-wrap" id="view-login" hidden>
+    <!-- Sign in -->
     <form class="card login-card" id="login-form" novalidate>
       <h1 class="login-title">Giriş</h1>
       <p class="muted">Bu çalışma alanı size özel erişim içindir.</p>
       <label class="field">
-        <span class="field-label">Kullanıcı adı</span>
-        <input id="login-user" name="username" type="text" autocomplete="username" required maxlength="64">
+        <span class="field-label">Kullanıcı adı ya da e-mail</span>
+        <input id="login-user" name="username" type="text" autocomplete="username" required maxlength="254" spellcheck="false" autocapitalize="none">
       </label>
-      <label class="field">
-        <span class="field-label">Parola</span>
-        <input id="login-pass" name="password" type="password" autocomplete="current-password" required maxlength="1024">
-      </label>
+      <div class="field">
+        <label class="field-label" for="login-pass">Parola</label>
+        <div class="pw-box">
+          <input id="login-pass" name="password" type="password" autocomplete="current-password" required maxlength="1024" placeholder="Lütfen 12 haneli parolayı girin." aria-describedby="login-pass-rules">
+          <button type="button" class="pw-toggle" data-toggle-for="login-pass" aria-label="Parolayı göster" aria-pressed="false" title="Parolayı göster"></button>
+        </div>
+        <p class="pw-rules" id="login-pass-rules" data-rules-for="login-pass"></p>
+      </div>
+      <p class="form-ok" id="login-ok" role="status" hidden></p>
       <p class="form-error" id="login-error" role="alert" hidden></p>
       <button type="submit" class="btn btn-primary btn-block" id="btn-login">Giriş yap</button>
+      <p class="login-links"><button type="button" class="link-btn" id="btn-forgot">Parolamı unuttum</button></p>
+    </form>
+
+    <!-- Password reset 1/3: ask for a code -->
+    <form class="card login-card" id="reset-request-form" novalidate hidden>
+      <h1 class="login-title">Parolamı unuttum</h1>
+      <p class="muted">Hesabınıza kayıtlı e-posta adresine 6 haneli bir doğrulama kodu göndereceğiz.</p>
+      <p class="notice notice-info" id="reset-disabled" hidden>Parola sıfırlama bu kurulumda kapalı: e-posta ayarları yapılmamış. Yöneticinize başvurun.</p>
+      <label class="field">
+        <span class="field-label">Kullanıcı adı ya da e-mail</span>
+        <input id="reset-user" type="text" autocomplete="username" required maxlength="254" spellcheck="false" autocapitalize="none">
+      </label>
+      <p class="form-error" id="reset-request-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-block" id="btn-reset-request">Kod gönder</button>
+      <p class="login-links"><button type="button" class="link-btn" data-back-to-login>Girişe dön</button></p>
+    </form>
+
+    <!-- Password reset 2/3: confirm the code -->
+    <form class="card login-card" id="reset-verify-form" novalidate hidden>
+      <h1 class="login-title">Doğrulama kodu</h1>
+      <p class="form-ok" id="reset-sent" role="status"></p>
+      <label class="field">
+        <span class="field-label">E-postadaki 6 haneli kod</span>
+        <input id="reset-code" class="code-input" type="text" inputmode="numeric" autocomplete="one-time-code" required maxlength="6" pattern="[0-9]{6}" placeholder="______">
+      </label>
+      <p class="form-error" id="reset-verify-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-block" id="btn-reset-verify">Kodu onayla</button>
+      <p class="login-links">
+        <button type="button" class="link-btn" id="btn-reset-resend">Kodu tekrar gönder</button>
+        <button type="button" class="link-btn" data-back-to-login>Girişe dön</button>
+      </p>
+    </form>
+
+    <!-- Password reset 3/3: new password, typed twice -->
+    <form class="card login-card" id="reset-new-form" novalidate hidden>
+      <h1 class="login-title">Yeni parola</h1>
+      <p class="muted">Kod onaylandı. Yeni parolanızı iki kez yazın.</p>
+      <input type="text" class="visually-hidden" id="reset-new-user" autocomplete="username" tabindex="-1" aria-hidden="true">
+      <div class="field">
+        <label class="field-label" for="new-pass">Yeni parola</label>
+        <div class="pw-box">
+          <input id="new-pass" type="password" autocomplete="new-password" required maxlength="1024" placeholder="Lütfen 12 haneli parolayı girin." aria-describedby="new-pass-rules">
+          <button type="button" class="pw-toggle" data-toggle-for="new-pass" aria-label="Parolayı göster" aria-pressed="false" title="Parolayı göster"></button>
+        </div>
+        <p class="pw-rules" id="new-pass-rules" data-rules-for="new-pass"></p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="new-pass2">Yeni parola (tekrar)</label>
+        <div class="pw-box">
+          <input id="new-pass2" type="password" autocomplete="new-password" required maxlength="1024" placeholder="Parolayı tekrar yazın" aria-describedby="new-pass2-note">
+          <button type="button" class="pw-toggle" data-toggle-for="new-pass2" aria-label="Parolayı göster" aria-pressed="false" title="Parolayı göster"></button>
+        </div>
+        <p class="pw-rules" id="new-pass2-note" hidden></p>
+      </div>
+      <p class="form-error" id="reset-new-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary btn-block" id="btn-reset-new">Parolayı kaydet</button>
+      <p class="login-links"><button type="button" class="link-btn" data-back-to-login>Girişe dön</button></p>
     </form>
   </section>
 

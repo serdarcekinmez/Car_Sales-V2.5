@@ -9,6 +9,7 @@ CONFIGURATION (Streamlit secrets — .streamlit/secrets.toml locally, "Secrets" 
 or environment variables of the same name):
   GARAJ_DEMO_USERNAME        pilot user name
   GARAJ_DEMO_PASSWORD_HASH   python pipeline/run_demo.py hash-password output
+  GARAJ_DEMO_EMAIL           optional: the account's e-mail (sign-in alternative)
   GARAJ_DEMO_DATA_URL        optional: HTTPS address of the zip made by
                              pipeline/pack_demo_data.py (private storage)
   GARAJ_DEMO_DATA_TOKEN      optional: bearer token for that address (e.g. a read-only
@@ -108,7 +109,8 @@ def runtime() -> A.DemoRuntime:
     """One runtime per server process, shared by every browser session."""
     settings = A.DemoSettings(root=data_root(), store_path=STORE_PATH,
                               username=setting("GARAJ_DEMO_USERNAME"),
-                              password_hash=setting("GARAJ_DEMO_PASSWORD_HASH"))
+                              password_hash=setting("GARAJ_DEMO_PASSWORD_HASH"),
+                              email=setting("GARAJ_DEMO_EMAIL"))
     settings.validate()
     store = Store(settings.store_path)
     store.initialize()
@@ -120,6 +122,14 @@ def runtime() -> A.DemoRuntime:
 # ----------------------------------------------------------------------------
 # Login / logout.
 # ----------------------------------------------------------------------------
+@st.cache_resource
+def account_store() -> Store:
+    """The store that may hold a newer password hash (saved by a reset in the web demo)."""
+    store = Store(STORE_PATH)
+    store.initialize()
+    return store
+
+
 def login_view() -> None:
     username, password_hash = setting("GARAJ_DEMO_USERNAME"), setting("GARAJ_DEMO_PASSWORD_HASH")
     if not username or not password_hash:
@@ -131,15 +141,20 @@ def login_view() -> None:
         st.subheader("Giriş")
         st.caption("Bu çalışma alanı size özel erişim içindir.")
         with st.form("login"):
-            user = st.text_input("Kullanıcı adı", max_chars=SEC.MAX_USERNAME_CHARS)
-            pw = st.text_input("Parola", type="password", max_chars=SEC.MAX_PASSWORD_CHARS)
+            user = st.text_input("Kullanıcı adı ya da e-mail", max_chars=SEC.MAX_IDENTIFIER_CHARS)
+            pw = st.text_input("Parola", type="password", max_chars=SEC.MAX_PASSWORD_CHARS,
+                               placeholder="Lütfen 12 haneli parolayı girin.")
+            st.markdown(f":red[**{SEC.PASSWORD_RULES_TR.replace('$', chr(92) + '$')}**]")
             ok = st.form_submit_button("Giriş yap", type="primary")
+        st.caption("Parolanızı unuttuysanız: parola sıfırlama (e-posta kodu) bu Streamlit "
+                   "sürümünde yok; yöneticinize başvurun.")
         if ok:
             fails = st.session_state.get("login_failures", 0)
+            account = A.Account(username, setting("GARAJ_DEMO_EMAIL"), password_hash,
+                                account_store())
             if fails >= 5:
                 st.error("Çok fazla hatalı deneme; sayfayı daha sonra yeniden açın.")
-            elif SEC.check_credentials(user.strip(), pw, expected_username=username,
-                                       password_hash=password_hash):
+            elif account.check(user, pw):
                 st.session_state.clear()
                 st.session_state["user"] = username
                 st.rerun()

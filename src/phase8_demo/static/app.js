@@ -21,6 +21,10 @@
     busy: false,
     statusTimer: null,
     tab: 'new',
+    resetEnabled: false,
+    resetIdentifier: '',
+    resetToken: null,
+    resendTimer: null,
   };
 
   const REASON_TR = {
@@ -171,14 +175,86 @@
     preview.textContent = name === 'Model Yılı' ? `= ${r.value}` : `= ${fmtDec.format(r.value)}`;
   }
 
+  // ------------------------------------------------------------------ password rules
+  // Mirrors security.password_problems; the server decides, this is the on-screen hint.
+  const PW_MIN = 12;
+  const PW_EXTRA_SYMBOLS = 'µ';             // Unicode letters counted as symbols
+  const PW_RULES_TEXT = 'Parola en az 12 hanelidir. Büyük harf, küçük harf, rakam ve sembol (# ; . , % & ¤ $ £ µ @ gibi) içermelidir.';
+
+  function passwordProblems(pw) {
+    const chars = Array.from(pw);
+    const missing = [];
+    if (chars.length < PW_MIN) missing.push(`en az ${PW_MIN} karakter`);
+    if (!chars.some((c) => /\p{Lu}/u.test(c))) missing.push('büyük harf');
+    if (!chars.some((c) => /\p{Ll}/u.test(c) && !PW_EXTRA_SYMBOLS.includes(c))) missing.push('küçük harf');
+    if (!chars.some((c) => /\p{Nd}/u.test(c))) missing.push('rakam');
+    if (!chars.some((c) => PW_EXTRA_SYMBOLS.includes(c) || !/[\p{L}\p{N}\s]/u.test(c))) missing.push('sembol');
+    return missing;
+  }
+
+  function renderRules(input) {
+    const note = document.querySelector(`[data-rules-for="${CSS.escape(input.id)}"]`);
+    if (!note) return;
+    const missing = passwordProblems(input.value);
+    note.classList.toggle('is-ok', missing.length === 0);
+    note.textContent = missing.length === 0 ? 'Parola kurallara uygun.'
+      : input.value ? `${PW_RULES_TEXT} Eksik: ${missing.join(', ')}.` : PW_RULES_TEXT;
+  }
+
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const EYE_PATHS = {
+    show: ['M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z', 'M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6z'],
+    hide: ['M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94',
+      'M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19',
+      'M14.12 14.12a3 3 0 1 1-4.24-4.24', 'M1 1l22 22'],
+  };
+
+  function eyeIcon(kind) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    const attrs = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2',
+      'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' };
+    for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
+    for (const d of EYE_PATHS[kind]) {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', d);
+      svg.append(p);
+    }
+    return svg;
+  }
+
+  // The eye button next to a password box: shows / hides what was typed.
+  function setPasswordVisible(btn, visible) {
+    const input = $(btn.dataset.toggleFor);
+    input.type = visible ? 'text' : 'password';
+    const label = visible ? 'Parolayı gizle' : 'Parolayı göster';
+    btn.setAttribute('aria-pressed', String(visible));
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    clear(btn);
+    btn.append(eyeIcon(visible ? 'hide' : 'show'));
+  }
+
   // ------------------------------------------------------------------ views
-  function showLogin(message) {
+  const AUTH_CARDS = ['login-form', 'reset-request-form', 'reset-verify-form', 'reset-new-form'];
+
+  function setMessage(node, text) {
+    node.textContent = text || '';
+    show(node, Boolean(text));
+  }
+
+  function showAuthCard(id) {
+    for (const card of AUTH_CARDS) show($(card), card === id);
+    for (const btn of document.querySelectorAll('.pw-toggle')) setPasswordVisible(btn, false);
+    for (const node of document.querySelectorAll('#view-login .form-error')) setMessage(node, '');
+  }
+
+  function showLogin(message, okMessage) {
     show($('view-app'), false);
     show($('session-box'), false);
     show($('view-login'), true);
-    const err = $('login-error');
-    err.textContent = message || '';
-    show(err, Boolean(message));
+    showAuthCard('login-form');
+    setMessage($('login-error'), message);
+    setMessage($('login-ok'), okMessage);
     clearInterval(state.statusTimer);
     state.statusTimer = null;
     $('login-user').focus();
@@ -926,6 +1002,160 @@
     showFormErrors([]);
   }
 
+  // ------------------------------------------------------------------ password reset
+  // 1) e-mail a 6-digit code, 2) confirm it (gives a one-time reset token),
+  // 3) set the new password, typed twice.
+  const RESEND_WAIT_S = 60;                 // the server sends at most one code a minute
+
+  async function requestResetCode(identifier) {
+    const data = await api('POST', '/api/password-reset/request', { identifier });
+    state.resetIdentifier = identifier;
+    $('reset-sent').textContent = data.message;
+    let left = RESEND_WAIT_S;
+    const btn = $('btn-reset-resend');
+    clearInterval(state.resendTimer);
+    const tick = () => {
+      btn.disabled = left > 0;
+      btn.textContent = left > 0 ? `Kodu tekrar gönder (${left} sn)` : 'Kodu tekrar gönder';
+      if (left-- <= 0) clearInterval(state.resendTimer);
+    };
+    tick();
+    state.resendTimer = setInterval(tick, 1000);
+  }
+
+  function wireAuth() {
+    for (const btn of document.querySelectorAll('.pw-toggle')) {
+      setPasswordVisible(btn, false);
+      btn.addEventListener('click', () => setPasswordVisible(btn, btn.getAttribute('aria-pressed') !== 'true'));
+    }
+    for (const note of document.querySelectorAll('[data-rules-for]')) {
+      const input = $(note.dataset.rulesFor);
+      renderRules(input);
+      input.addEventListener('input', () => renderRules(input));
+    }
+    const renderMatch = () => {
+      const a = $('new-pass').value;
+      const b = $('new-pass2').value;
+      const note = $('new-pass2-note');
+      show(note, b.length > 0);
+      note.classList.toggle('is-ok', a === b);
+      note.textContent = a === b ? 'Parolalar aynı.' : 'Parolalar aynı değil.';
+    };
+    $('new-pass').addEventListener('input', renderMatch);
+    $('new-pass2').addEventListener('input', renderMatch);
+
+    $('btn-forgot').addEventListener('click', async () => {
+      showAuthCard('reset-request-form');
+      const typed = $('login-user').value.trim();
+      if (typed) $('reset-user').value = typed;
+      $('reset-user').focus();
+      try {
+        state.resetEnabled = Boolean((await api('GET', '/api/session')).reset_enabled);
+      } catch (e) {
+        state.resetEnabled = false;
+      }
+      show($('reset-disabled'), !state.resetEnabled);
+      $('btn-reset-request').disabled = !state.resetEnabled;
+    });
+    for (const btn of document.querySelectorAll('[data-back-to-login]')) {
+      btn.addEventListener('click', () => {
+        state.resetToken = null;
+        showLogin('');
+      });
+    }
+
+    $('reset-request-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const err = $('reset-request-error');
+      const ident = $('reset-user').value.trim();
+      setMessage(err, '');
+      if (!ident) { setMessage(err, 'Kullanıcı adınızı ya da e-mail adresinizi yazın.'); return; }
+      $('btn-reset-request').disabled = true;
+      try {
+        await requestResetCode(ident);
+        $('reset-code').value = '';
+        showAuthCard('reset-verify-form');
+        $('reset-code').focus();
+      } catch (e) {
+        setMessage(err, e.message);
+      } finally {
+        $('btn-reset-request').disabled = !state.resetEnabled;
+      }
+    });
+
+    $('reset-code').addEventListener('input', () => {
+      const digits = $('reset-code').value.replace(/\D/g, '').slice(0, 6);
+      if (digits !== $('reset-code').value) $('reset-code').value = digits;
+    });
+
+    $('btn-reset-resend').addEventListener('click', async () => {
+      const err = $('reset-verify-error');
+      setMessage(err, '');
+      try {
+        await requestResetCode(state.resetIdentifier);
+        $('reset-code').focus();
+      } catch (e) {
+        setMessage(err, e.message);
+      }
+    });
+
+    $('reset-verify-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const err = $('reset-verify-error');
+      const code = $('reset-code').value.trim();
+      setMessage(err, '');
+      if (!/^\d{6}$/.test(code)) { setMessage(err, 'Kod 6 rakamdan oluşur.'); return; }
+      $('btn-reset-verify').disabled = true;
+      try {
+        const data = await api('POST', '/api/password-reset/verify', { code });
+        state.resetToken = data.reset_token;
+        $('new-pass').value = '';
+        $('new-pass2').value = '';
+        renderRules($('new-pass'));
+        renderMatch();
+        $('reset-new-user').value = state.resetIdentifier;
+        showAuthCard('reset-new-form');
+        $('new-pass').focus();
+      } catch (e) {
+        setMessage(err, e.message);
+      } finally {
+        $('btn-reset-verify').disabled = false;
+      }
+    });
+
+    $('reset-new-form').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const err = $('reset-new-error');
+      const pw = $('new-pass').value;
+      const pw2 = $('new-pass2').value;
+      setMessage(err, '');
+      const missing = passwordProblems(pw);
+      if (missing.length) {
+        setMessage(err, `${PW_RULES_TEXT} Eksik: ${missing.join(', ')}.`);
+        $('new-pass').focus();
+        return;
+      }
+      if (pw !== pw2) { setMessage(err, 'Yazdığınız iki parola aynı değil.'); $('new-pass2').focus(); return; }
+      $('btn-reset-new').disabled = true;
+      try {
+        await api('POST', '/api/password-reset/complete',
+          { reset_token: state.resetToken, password: pw, password_confirm: pw2 });
+        state.resetToken = null;
+        $('new-pass').value = '';
+        $('new-pass2').value = '';
+        $('login-user').value = state.resetIdentifier;
+        $('login-pass').value = '';
+        renderRules($('login-pass'));
+        showLogin('', 'Parolanız değiştirildi. Yeni parolanızla giriş yapabilirsiniz.');
+        $('login-pass').focus();
+      } catch (e) {
+        setMessage(err, e.message);
+      } finally {
+        $('btn-reset-new').disabled = false;
+      }
+    });
+  }
+
   // ------------------------------------------------------------------ wiring
   function wire() {
     $('login-form').addEventListener('submit', async (ev) => {
@@ -934,11 +1164,14 @@
       const pass = $('login-pass').value;
       const err = $('login-error');
       show(err, false);
-      if (!user || !pass) { err.textContent = 'Kullanıcı adı ve parola gerekli.'; show(err, true); return; }
+      setMessage($('login-ok'), '');
+      if (!user || !pass) { err.textContent = 'Kullanıcı adı (ya da e-mail) ve parola gerekli.'; show(err, true); return; }
       $('btn-login').disabled = true;
       try {
         const s = await api('POST', '/api/login', { username: user, password: pass });
         $('login-pass').value = '';
+        renderRules($('login-pass'));
+        setPasswordVisible(document.querySelector('[data-toggle-for="login-pass"]'), false);
         onLoggedIn(s);
       } catch (e) {
         err.textContent = e.message;
@@ -954,8 +1187,10 @@
       state.current = null;
       show($('result'), false);
       show($('result-empty'), true);
-      showLogin('Çıkış yapıldı.');
+      showLogin('', 'Çıkış yapıldı.');
     });
+
+    wireAuth();
 
     $('btn-shutdown').addEventListener('click', async () => {
       if (!window.confirm('Uygulama tamamen kapatılsın mı? Sunucu durur; yeniden açmak için başlatma komutunu tekrar çalıştırmanız gerekir.')) return;
