@@ -55,7 +55,8 @@ PUBLIC API
   asof_fx_rate(dates, fx)                                -> DataFrame (rate, bar_date)
   build_price_history(population, fx, *, clean_sales)   -> PriceHistory  (sold rows only)
   attach_price_features(population, clean_sales, history, fx, *, use_min_fiyat,
-                        use_lineup)                      -> DataFrame     (no label needed)
+                        use_lineup, history_day=None)    -> DataFrame     (no label needed)
+  history_last_day(history)                              -> Timestamp | None
   feature_columns(*, use_min_fiyat, use_lineup)          -> list[str]
   fit_price_encoders(features, *, fit_mask, use_min_fiyat, use_lineup, min_count=5)
                                                          -> PriceEncoders
@@ -272,6 +273,13 @@ def _window_stats(d_arr: np.ndarray, p_arr: np.ndarray, day: int, window: int):
     return n, float(np.median(p_arr[lo:hi])), float(day - d_arr[hi - 1])
 
 
+def history_last_day(history: PriceHistory):
+    """Day of the latest sale indexed in `history` (None when it is empty)."""
+    if len(history.market_days) == 0:
+        return None
+    return pd.Timestamp(np.datetime64(int(history.market_days[-1]), "D"))
+
+
 def _history_features(v: pd.DataFrame, days: np.ndarray, history: PriceHistory) -> pd.DataFrame:
     out = {}
     W = history.window_days
@@ -322,10 +330,16 @@ def _assert_no_forbidden(names) -> None:
 
 def attach_price_features(population: pd.DataFrame, clean_sales: pd.DataFrame,
                           history: PriceHistory, fx: pd.DataFrame, *,
-                          use_min_fiyat: bool, use_lineup: bool) -> pd.DataFrame:
+                          use_min_fiyat: bool, use_lineup: bool,
+                          history_day=None) -> pd.DataFrame:
     """
     One row per population row, same order: KEY_COLUMNS, AUX_COLUMNS (fx_rate, fx_bar_date)
     and feature_columns(...). Works on any subset of rows with identical values.
+
+    history_day (optional, one date for all rows): the day the H features (segment and
+    market medians) are measured at, instead of each row's aa_tarihi. Inference uses it
+    when the prediction date lies past the end of the sales history (see model_b). The
+    FX rate and every TL->USD conversion still use aa_tarihi.
 
     `population` needs only query_id, source_row, plaka, aa_kodu and aa_tarihi; source_row
     is the row's position in `clean_sales`. satis_tutari is neither required nor read, so
@@ -352,7 +366,9 @@ def attach_price_features(population: pd.DataFrame, clean_sales: pd.DataFrame,
             out["tramer_tutari_usd"] = num / rate
         else:
             out[c] = num
-    hist = _history_features(v, days, history)
+    hdays = days if history_day is None else np.full(
+        len(days), _day(pd.Series([pd.Timestamp(history_day)]))[0], dtype="int64")
+    hist = _history_features(v, hdays, history)
     out = pd.concat([out, hist], axis=1)
     if use_min_fiyat:
         mf = pd.to_numeric(v["min_fiyat_clean"], errors="coerce").astype("float64").to_numpy()

@@ -372,6 +372,12 @@ def _run_model_b(bundle: Bundle, rows: pd.DataFrame, *, mode: str, recency: dict
         warnings.append(_w("no_segment_history",
                            "Bu marka-model için tahmin tarihinden önceki 365 günde kayıtlı "
                            "satış yok; tahmin daha belirsizdir."))
+    if est["history_anchored"]:
+        warnings.append(_w("history_anchored",
+                           f"Satış geçmişi tahmin tarihinden önce bitiyor. Fiyat, son kayıtlı "
+                           f"piyasa düzeyiyle ({est['history_asof']} itibarıyla) USD olarak "
+                           f"hesaplandı ve tahmin tarihinin kuruyla TL'ye çevrildi. O tarihten "
+                           f"sonraki USD bazındaki piyasa değişimi fiyata yansımaz."))
     if not (sup["market_median_30d_present"] and sup["market_median_90d_present"]):
         warnings.append(_w("no_recent_market",
                            "Tahmin tarihinden önceki 30/90 günde kayıtlı satış yok; fiyat güncel "
@@ -387,7 +393,8 @@ def _run_model_b(bundle: Bundle, rows: pd.DataFrame, *, mode: str, recency: dict
         warnings += _replay_warnings(day, end, SPLIT_BOUNDARY, "Model B")
     return {**base, "status": "ok", "price_tl": est["price_tl"], "price_usd": est["price_usd"],
             "fx": {**fx, "rate": est["fx_rate"], "bar_date": est["fx_bar_date"]},
-            "history_support": sup, "warnings": warnings}
+            "history_support": sup, "history_asof": est["history_asof"],
+            "history_anchored": est["history_anchored"], "warnings": warnings}
 
 
 # ----------------------------------------------------------------------------

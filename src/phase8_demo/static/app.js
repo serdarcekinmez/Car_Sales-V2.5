@@ -850,7 +850,9 @@
     const mb = view.identity && view.identity.models ? view.identity.models.model_b : null;
     add('Model', `${b.model}` + (mb && mb.fit_date_range && mb.fit_date_range.length ? ` (eğitim verisi ${mb.fit_date_range[0]} – ${mb.fit_date_range[1]})` : ''));
     add('Fiyat aralığı', b.interval_note || 'Gösterilmez.');
-    for (const h of b.history_support_tr || []) add(`Önceki 365 günde ${h.label}`, `${fmtInt.format(h.n || 0)} satış`);
+    if (b.history_anchored) add('Piyasa düzeyi', `${b.history_asof} itibarıyla (son kayıtlı satışlar); USD fiyat bugünkü kurla TL'ye çevrildi`);
+    const histWhen = b.history_anchored ? `${b.history_asof} öncesi 365 günde` : 'Önceki 365 günde';
+    for (const h of b.history_support_tr || []) add(`${histWhen} ${h.label}`, `${fmtInt.format(h.n || 0)} satış`);
     const mf = view.vehicle ? view.vehicle.min_fiyat_clean : null;
     if (view.mode === 'current' && typeof mf === 'number' && mf > 0) add('Girilen Min.Fiyat', `${fmtInt.format(mf)} TL — yalnızca bilgi; bu tahmini etkilemez`);
     body.append(dl);

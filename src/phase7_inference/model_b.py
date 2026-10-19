@@ -20,6 +20,17 @@ before the prediction date, at most MAX_FX_LAG_DAYS old (price_features.asof_fx_
 With no admissible bar the price is UNAVAILABLE: no stale rate is substituted and nothing
 is fetched.
 
+HISTORY ANCHOR (2026-10-19). The H features (segment medians over 365 days, market medians
+over 30 / 90 days) look back from the day they are measured at. When the prediction date
+is more than one day past the last sale in the history (e.g. history ends 2026-06-04,
+prediction in October), the 30 / 90-day market windows would be EMPTY. The model never saw
+them missing in training, and LightGBM then reads the missing value as 0 (a market median
+of 1 USD), which pulls the price down. So the H features are measured at the day after the
+last recorded sale (history_asof): the vehicle is priced in USD at the latest known market
+level, and that USD price is converted to TL at the prediction date's rate. Vehicle facts
+(car age, KM, ...) stay at the prediction date. Predictions inside the history (historical
+replay, or a current date right after the data) are unchanged.
+
 PUBLIC API
   load_model_b(*, clean_sales, fx, model_path)    -> ModelB
   fx_status(model, day)                            -> JSON-safe dict
@@ -105,8 +116,13 @@ def estimate_price(model: ModelB, rows: pd.DataFrame, *, source_rows=None) -> di
                      + rows["aa_kodu"].astype("string")).to_numpy(),
         "source_row": src, "plaka": rows["plaka"].to_numpy(),
         "aa_kodu": rows["aa_kodu"].to_numpy(), "aa_tarihi": rows["aa_tarihi"].to_numpy()})
+    day = pd.Timestamp(rows["aa_tarihi"].iloc[0]).normalize()
+    last = PF.history_last_day(model.history)
+    anchor = last + pd.Timedelta(days=1) if last is not None else None
+    history_day = anchor if anchor is not None and day > anchor else None
     feats = PF.attach_price_features(population, lookup, model.history, model.fx,
-                                     use_min_fiyat=False, use_lineup=False)
+                                     use_min_fiyat=False, use_lineup=False,
+                                     history_day=history_day)
     pred = PM.predict(model.model, feats)
     f = feats.iloc[0]
     support = {f"{lvl}_n": int(f[f"hist_{lvl}_n"]) for lvl in PF.HISTORY_LEVELS}
@@ -116,4 +132,6 @@ def estimate_price(model: ModelB, rows: pd.DataFrame, *, source_rows=None) -> di
             "price_usd": float(pred["pred_usd"].iloc[0]),
             "fx_rate": float(f["fx_rate"]),
             "fx_bar_date": str(pd.Timestamp(f["fx_bar_date"]).date()),
-            "history_support": support}
+            "history_support": support,
+            "history_asof": str((history_day or day).date()),
+            "history_anchored": history_day is not None}

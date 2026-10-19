@@ -174,6 +174,7 @@ location / {
 
 - **Kur:** Kur dosyası 2 Ekim 2026'da bitiyor. Fiyat için tahmin tarihinden önceki en fazla 7 günlük kur gerekir. Bu nedenle 9 Ekim 2026'dan sonraki tahmin tarihlerinde fiyat "gösterilemiyor" olur ve firma listesi yine gelir. Düzeltmek için yeni kur kaydı çekilir (`python src/phase5_pricing/fx_rates.py fetch --start 2024-11-01`) ve sunucu yeniden başlatılır; yeni dosya kendiliğinden seçilir. Uygulama kuru kendisi çekmez.
 - **Geçmiş veri:** Satış ve teklif geçmişi 4 Haziran 2026'da bitiyor. Bugünkü araçlar için ekranda "eski veri" uyarısı görünür. Yeni dışa aktarımlar geldiğinde önce Faz 1–3 çıktıları yenilenir, sonra sunucu yeniden başlatılır. Bu işlem modeli yeniden eğitmez.
+- **Fiyat ve geçmiş verinin bitişi:** Fiyat modeli USD ile çalışır. Araç, son kayıtlı satışların USD piyasa düzeyiyle fiyatlanır ve sonuç tahmin tarihinden önceki son USDTRY kuruyla TL'ye çevrilir. Tahmin tarihi satış geçmişinin bitişinden sonraysa, segment ve 30/90 günlük piyasa medyanları geçmişin bittiği günün ertesine göre ölçülür. Öncesinde bu pencereler boş kalıyor ve fiyat olması gerekenden düşük çıkıyordu. Ekranda "Piyasa düzeyi … itibarıyla" satırı bu durumu gösterir. Etkiyi kendi verinizde ölçmek için: `python pipeline/check_price_anchor.py`.
 - **Paket kimliği:** Her tahmin; veri, model, Faz 7 kodu ve çalışma ortamı özetini (`bundle_id`), filtre kurallarını ve Faz 8 sunucu kodunun özetini birlikte saklar. Böylece bir sonucun neden değiştiği izlenebilir.
 
 ## 6. İlk çalıştırmada yapılacak kabul kontrolü (henüz yapılmadı)

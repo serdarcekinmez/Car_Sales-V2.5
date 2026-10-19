@@ -407,8 +407,13 @@ def price_card(view: dict) -> None:
                f"({fx.get('bar_date', '?')} açılış kuru) · 1.000 TL'ye yuvarlandı")
     if b.get("meaning"):
         st.info(b["meaning"])
+    if b.get("history_anchored"):
+        st.caption(f"Piyasa düzeyi {b['history_asof']} itibarıyla (son kayıtlı satışlar); USD "
+                   f"fiyat bugünkü kurla TL'ye çevrildi.")
+    when = f"{b['history_asof']} öncesi 365 günde" if b.get("history_anchored") \
+        else "Önceki 365 günde"
     for h in b.get("history_support_tr") or []:
-        st.caption(f"Önceki 365 günde {h['label']}: {fmt_int(h['n'] or 0)} satış")
+        st.caption(f"{when} {h['label']}: {fmt_int(h['n'] or 0)} satış")
 
 
 def results(rt: A.DemoRuntime) -> None:
