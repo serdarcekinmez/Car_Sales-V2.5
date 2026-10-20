@@ -4,7 +4,16 @@
 *
 
 !requirements-demo.txt
+!requirements-space.txt
+!pipeline/
 !pipeline/run_demo.py
+!pipeline/download_demo_data.py
+!pipeline/run_space.py
+!deploy/
+!deploy/huggingface/
+!deploy/huggingface/data-manifest.json
+!src/
+src/*
 !src/common/
 !src/phase1_preparation/
 !src/phase2_labels/
@@ -26,4 +35,20 @@
 **/*.sqlite
 **/*.sqlite3
 **/*.log
+**/*.zip
+**/*.json
+**/*.pkl
+**/*.pickle
+**/*.joblib
+**/*.model
 **/*:Zone.Identifier
+
+# Only approved entrypoints and metadata from these parent directories.
+pipeline/*
+!pipeline/run_demo.py
+!pipeline/download_demo_data.py
+!pipeline/run_space.py
+deploy/*
+!deploy/huggingface/
+deploy/huggingface/*
+!deploy/huggingface/data-manifest.json

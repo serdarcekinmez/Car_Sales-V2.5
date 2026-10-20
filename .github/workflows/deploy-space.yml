@@ -1,0 +1,42 @@
+name: Deploy FastAPI Space (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-car-sales-space
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: huggingface-space
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install frozen runtime and test client
+        run: pip install -r requirements-space.txt httpx==0.28.1
+      - name: Run offline deployment tests
+        run: python -m unittest discover -s tests -v
+      - name: Prepare code-only Space
+        run: python pipeline/prepare_space.py "$RUNNER_TEMP/space"
+      - name: Verify Docker build without secrets or data
+        run: docker build -t garaj-space "$RUNNER_TEMP/space"
+      - name: Upload approved code to existing Space
+        env:
+          HF_SPACE_WRITE_TOKEN: ${{ secrets.HF_SPACE_WRITE_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          token = os.environ.get('HF_SPACE_WRITE_TOKEN')
+          if not token:
+              raise SystemExit('HF_SPACE_WRITE_TOKEN is required')
+          HfApi(token=token).upload_folder(
+              repo_id='CSerdar014191/Car_Sales_V2.5', repo_type='space',
+              folder_path=os.path.join(os.environ['RUNNER_TEMP'], 'space'),
+              commit_message='Deploy reviewed FastAPI demo')
+          PY

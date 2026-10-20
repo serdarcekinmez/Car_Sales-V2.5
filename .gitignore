@@ -77,3 +77,6 @@ node_modules/
 # Streamlit secrets and the packed demo data
 .streamlit/secrets.toml
 garaj_demo_data*.zip
+.venv-deploy/
+/.deployment-check/
+/.space-package/

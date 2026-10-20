@@ -1,0 +1,42 @@
+{
+  "Datasets/interim/phase1_preparation/clean_sales.parquet": {
+    "size": 2365209,
+    "sha256": "8b48fcd203c98e6eb0876d18f92a21cae71444d3cf2228f879d1d24337912d3d"
+  },
+  "Datasets/raw/\u00dcye-Kurumsal Raporu_2026-06-07.xlsx": {
+    "size": 164261,
+    "sha256": "c8ae66ec5ce90b5a0929bafbdfda27d65f49af2cbba0f7c502b56de34c8051cd"
+  },
+  "Datasets/interim/phase1_preparation/clean_reel_db.parquet": {
+    "size": 3067733,
+    "sha256": "de8ad998b0c07d052f450a8a93f30421396cd17eaf0092c1061dc61eb36175b9"
+  },
+  "Datasets/interim/phase2_labels/labeled_candidates.parquet": {
+    "size": 13297945,
+    "sha256": "09684ca363475a924c84622ad3146afe6a7f010b04eaab2971df74b61ad8fd32"
+  },
+  "Datasets/interim/phase3_firm_universe/firm_registry.parquet": {
+    "size": 138667,
+    "sha256": "596288d8b30b029fa00967c5d959ef3551f6e1c73621a42c610c9106765fdc27"
+  },
+  "Datasets/lookups/internal_firm_lookup.csv": {
+    "size": 410,
+    "sha256": "79560f7a1b33d3ca95e0fc43f435fb24b8831e89df7128e34553ef7fdaaa79d9"
+  },
+  "Datasets/raw/2501-260604 AA Kat\u0131l\u0131m Raporu.xlsx": {
+    "size": 12333411,
+    "sha256": "e7d32af8424adc728e90d693bc33246fd0529e64a15291e49d66ef949b399bd9"
+  },
+  "Datasets/external/fx/USDTRY_yahoo_daily_2024-11-01_2026-10-09_fetched20261009T170305.csv": {
+    "size": 53237,
+    "sha256": "e1152e03ac8e09394b57ca48e6bfe774ce49881a30fa34d24ad615438efa211c"
+  },
+  "workflow/runs/phase4_experiment_build/results/final_model.json": {
+    "size": 724665,
+    "sha256": "b22fbff0db38d8feda6e177f026fdb6846806fa8fb295f67add512bbc8c7d3d7"
+  },
+  "workflow/runs/phase5_experiment_build/results/models/lgbm_noR.json": {
+    "size": 1225556,
+    "sha256": "7a72c9a8109ce2b844ced0dc7268b22de6c261cf0ce4df5ec6301bda799fb25e"
+  }
+}

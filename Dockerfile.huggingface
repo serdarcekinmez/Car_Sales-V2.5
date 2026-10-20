@@ -1,0 +1,19 @@
+FROM python:3.10-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 \
+    HF_HUB_DISABLE_TELEMETRY=1 HF_HUB_DISABLE_PROGRESS_BARS=1 \
+    HF_HUB_DISABLE_IMPLICIT_TOKEN=1 HOME=/home/demo
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 1000 --create-home demo
+WORKDIR /app
+COPY requirements-demo.txt requirements-space.txt ./
+RUN pip install -r requirements-space.txt
+COPY src/ ./src/
+COPY pipeline/run_demo.py pipeline/download_demo_data.py pipeline/run_space.py ./pipeline/
+COPY deploy/huggingface/data-manifest.json ./deploy/huggingface/data-manifest.json
+RUN mkdir -p /home/demo/runtime && chown demo:demo /home/demo/runtime
+ENV GARAJ_DEMO_ROOT=/home/demo/runtime/bundle \
+    GARAJ_DEMO_STORE=/home/demo/runtime/demo.sqlite3
+USER 1000
+EXPOSE 8000
+CMD ["python", "pipeline/run_space.py"]
