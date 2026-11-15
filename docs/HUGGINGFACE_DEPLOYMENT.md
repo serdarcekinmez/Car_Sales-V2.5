@@ -29,6 +29,15 @@ paths, links, special files, encrypted ZIPs, bad CRCs and hash mismatches. Limit
 64 MiB compressed, 256 MiB total expanded, 128 MiB per member, 100 entries and 1000:1
 compression ratio. Only the exact manifest files are written in a temporary sibling
 directory, then published by rename. Existing invalid directories are never overwritten.
+
+The serving runtime separately refreshes USD/TRY from Yahoo Finance on startup and once
+per UTC day. An hourly worker retries failed checks and detects the next day. Immutable
+FX snapshots and an atomic checkpoint live in `fx-cache/` beside `GARAJ_DEMO_STORE`,
+outside the verified data bundle. The price model adopts a new snapshot without a server
+restart; active predictions retain their original bundle identity. Network/write failures
+keep the previous snapshot and show a warning. The existing seven-day FX limit still
+applies. No extra HF secret or scheduled agent is needed; allow outbound HTTPS to Yahoo
+Finance. After changing GitHub code, run the manual deployment workflow to update Space.
 Verified existing data is reused offline. ZIP caches and staging directories are temporary.
 The compressed limit is checked after the SDK download; token-scoped repository access
 and the reviewed manifest are the trust boundary, not a streaming download quota.

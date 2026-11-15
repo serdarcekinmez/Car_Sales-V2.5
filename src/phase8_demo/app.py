@@ -7,8 +7,10 @@ phase7_inference.predict with the frozen models. Nothing is approximated in the 
 
 STARTUP. create_app(settings) validates the configuration, opens the SQLite store and
 returns the ASGI app wrapped in security.GuardMiddleware. The Phase-7 bundle (Excel /
-parquet reads, history indexes, both models) is loaded ONCE in a background thread at
-startup; until it is ready the API answers 503 with a readable state, and a failed load
+parquet reads, history indexes, both models) is loaded in a background thread at
+startup, after checking the daily FX cache. Daily updates replace only the price model's
+FX/history state and bundle identity; prediction calls remain offline. Until the initial
+bundle is ready the API answers 503 with a readable state, and a failed load
 shows a sanitized message (logical input names only, no server path).
 
 PREDICTIONS. One prediction runs at a time (a process-wide lock: the frozen runtime is not
@@ -86,6 +88,7 @@ from phase7_inference import filters as FL
 from phase7_inference import predict as PR
 from phase7_inference.vehicle_input import KEY_SEPARATOR, RAW_COLUMNS
 from phase8_demo import security as SEC
+from phase8_demo.fx_refresh import FxRefresh
 from phase8_demo.mailer import valid_address
 from phase8_demo.store import PredictionRecord, Store, StoreError
 
@@ -96,7 +99,7 @@ _PKG = Path(__file__).resolve().parent
 _SRC = _PKG.parent
 _REPO = _SRC.parent
 SERVING_FILES = ("phase8_demo/__init__.py", "phase8_demo/app.py", "phase8_demo/store.py",
-                 "phase8_demo/security.py", "phase8_demo/mailer.py",
+                 "phase8_demo/security.py", "phase8_demo/mailer.py", "phase8_demo/fx_refresh.py",
                  "phase8_demo/static/index.html",
                  "phase8_demo/static/app.js", "phase8_demo/static/style.css")
 RUNNER_FILE = "pipeline/run_demo.py"
@@ -624,10 +627,48 @@ class DemoRuntime:
         self.examples: list[dict] = []
         self.example_index: dict[str, str] = {}
         self.started_at_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.fx_refresh = FxRefresh(settings.root, settings.store_path)
+        self._fx_activation_message = None
+        self._refresh_stop = threading.Event()
+        self._refresh_thread = None
+
+    def start(self, *, initial_load=True) -> None:
+        """One background worker for all browser sessions, including Streamlit."""
+        if self._refresh_thread is not None:
+            return
+        def worker():
+            if initial_load:
+                self.load()
+            while not self._refresh_stop.wait(3600):
+                self.refresh_fx()
+        self._refresh_thread = threading.Thread(target=worker, name="demo-fx-refresh", daemon=True)
+        self._refresh_thread.start()
+
+    def stop(self) -> None:
+        self._refresh_stop.set()
+
+    def refresh_fx(self) -> None:
+        path = self.fx_refresh.refresh()
+        with self._state_lock:
+            current = self.bundle
+        if current is None or path is None or self._refresh_stop.is_set():
+            return
+        try:
+            # Model loading is serialized with prediction; network access above is not.
+            with self._predict_lock:
+                updated = BD.with_fx_snapshot(current, path)
+            with self._state_lock:
+                self.bundle = updated
+                self._fx_activation_message = None
+        except Exception:
+            log.exception("Could not activate refreshed FX; keeping active bundle")
+            with self._state_lock:
+                self._fx_activation_message = "Yeni döviz kuru yüklenemedi; son kayıt kullanılıyor. Otomatik olarak tekrar denenecek."
 
     def load(self) -> None:
         try:
-            bundle = BD.load_bundle(BD.BundleConfig(root=self.settings.root))
+            path = self.fx_refresh.refresh()
+            bundle = BD.load_bundle(BD.BundleConfig(root=self.settings.root, fx_snapshot=path))
             options = build_options(bundle)
             examples, index = build_examples(bundle)
         except BD.BundleError as exc:
@@ -661,6 +702,8 @@ class DemoRuntime:
             out = {"state": self.state, "message": self.message,
                    "started_at_utc": self.started_at_utc,
                    "serving_code_sha256": self.serving_code,
+                   "fx_refresh": {"checked_day": self.fx_refresh.checked_day,
+                                  "message": self._fx_activation_message or self.fx_refresh.message},
                    "today": date.today().isoformat(), "bundle": None}
             if b is not None:
                 m = b.manifest
@@ -783,8 +826,11 @@ def create_app(settings: DemoSettings, *, on_shutdown=None, mailer=None):
 
     @asynccontextmanager
     async def lifespan(_app):
-        threading.Thread(target=rt.load, name="phase7-bundle-loader", daemon=True).start()
-        yield
+        rt.start()
+        try:
+            yield
+        finally:
+            rt.stop()
 
     api = FastAPI(title="Garaj demo", docs_url=None, redoc_url=None, openapi_url=None,
                   lifespan=lifespan)

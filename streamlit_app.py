@@ -116,6 +116,7 @@ def runtime() -> A.DemoRuntime:
     store.initialize()
     rt = A.DemoRuntime(settings, store, A.serving_code_sha256())
     rt.load()
+    rt.start(initial_load=False)
     return rt
 
 
@@ -230,6 +231,7 @@ def header() -> None:
         st.button("Oturumu kapat", on_click=logout, type="secondary")
 
 
+@st.fragment(run_every="60s")
 def status_strip(rt: A.DemoRuntime) -> None:
     s = rt.status()
     if s["state"] != "ready" or not s["bundle"]:
@@ -243,6 +245,8 @@ def status_strip(rt: A.DemoRuntime) -> None:
     parts.append("Firma modeli: " + ("hazır" if comp["model_a"] == "ready" else "yok"))
     parts.append("Fiyat modeli: " + ("hazır" if comp["model_b"] == "ready" else "yok"))
     st.caption("Veri durumu · " + " · ".join(parts))
+    if s.get("fx_refresh", {}).get("message"):
+        st.warning(s["fx_refresh"]["message"])
 
 
 def vehicle_form(rt: A.DemoRuntime) -> None:

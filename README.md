@@ -54,7 +54,20 @@ Ayrıntılar ve Docker + HTTPS kurulumu için: [docs/DEMO_KURULUM.md](docs/DEMO_
 
 ## Veriyi yenileme
 
-Yeni dışa aktarımlar `Datasets/raw/` klasörüne konur ve yenileme şu sırayla yapılır: `run_phase1.py` → `run_phase2.py` → `run_phase3_firm_registry.py`. Kur kaydı ayrıca çekilir: `python src/phase5_pricing/fx_rates.py fetch --start 2024-11-01`. Son olarak sunucu yeniden başlatılır. Bu işlem modelleri yeniden eğitmez.
+Yeni dışa aktarımlar `Datasets/raw/` klasörüne konur ve yenileme şu sırayla yapılır: `run_phase1.py` → `run_phase2.py` → `run_phase3_firm_registry.py`. Son olarak sunucu yeniden başlatılır. Bu işlem modelleri yeniden eğitmez.
+
+USD/TRY kuru yerel, Docker, Hugging Face ve Streamlit uygulamalarında otomatik güncellenir.
+Açılışta Yahoo Finance kontrol edilir; aynı UTC günü başarılı kontrol yapılmışsa önbellek
+kullanılır. Uygulama açıkken saatlik kontrol döngüsü yeni günde tekrar veri çeker; başarısız
+indirmeler de bir sonraki saat yeniden denenir. Güncel tablo fiyat modeline otomatik yüklenir.
+İnternet erişimi ve SQLite dosyasının yanındaki `fx-cache/` klasörüne yazma izni gerekir.
+Hugging Face'teki doğrulanan veri paketi değiştirilmez. Önbellek silinirse paket üzerinden
+yeniden oluşturulur. Eski geçerli kurlar korunur; yalnızca yeni tarihler ve indirilen aralıktaki
+eksik kurlar eklenir. Hafta sonlarında son yayımlanan iş günü kullanılır; tahmin tarihinden
+önceki kur ve en fazla 7 gün gecikme kuralı korunur. Güncelleme başarısızsa son kayıt
+kullanılır ve arayüzde açıklama gösterilir. Satış/teklif geçmişi otomatik yenilenmez.
+
+Elle kur dosyası üretmek için: `python src/phase5_pricing/fx_rates.py fetch --start 2024-11-01`.
 
 Katılım raporu, üye dizini ve kur dosyası adıyla değil rolüyle bulunur, bu yüzden yeni tarihli dosyalar için kodda ayar değiştirmek gerekmez. `Datasets/raw/` içinde katılım raporundan ve üye dizininden **birer tane** bulunmalıdır; eski dışa aktarımlar klasör dışına taşınır (birden fazla varsa çalıştırma hata verir). Kur için `Datasets/external/fx/` içindeki kapsamı en geç biten kayıt seçilir. Ayrıntılar: [docs/DEMO_KURULUM.md](docs/DEMO_KURULUM.md) §1.
 

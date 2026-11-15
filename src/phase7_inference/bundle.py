@@ -55,7 +55,7 @@ import json
 import logging
 import platform
 import threading
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
@@ -125,6 +125,8 @@ class BundleConfig:
     model_a: str = "workflow/runs/phase4_experiment_build/results/final_model.json"
     model_b: str = "workflow/runs/phase5_experiment_build/results/models/lgbm_noR.json"
     stale_after_days: int = 30
+    # Serving layer's immutable runtime snapshot, outside the downloaded bundle.
+    fx_snapshot: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,11 @@ def _find_auto(config: BundleConfig, name: str) -> Path:
 
 def _resolve(config: BundleConfig, name: str) -> Path:
     """The file of logical input `name`. Errors name the input only; the path is logged."""
+    if name == "fx_file" and config.fx_snapshot is not None:
+        path = Path(config.fx_snapshot)
+        if not path.is_file():
+            raise BundleError("runtime FX snapshot is missing")
+        return path
     rel = getattr(config, name)
     if rel is None and name in AUTO_INPUTS:
         return _find_auto(config, name)
@@ -402,6 +409,33 @@ def _manifest(config, hashes, sources, version, ranges, model_a, model_b, errors
         "filters_version": _filters.FILTER_VERSION,
         "stale_after_days": config.stale_after_days,
     }
+
+
+def with_fx_snapshot(bundle: Bundle, path: Path) -> Bundle:
+    """Build a replacement price model and identity without mutating active requests.
+
+    Historical inputs and Model A remain shared; all prediction APIs stay offline.
+    Failure leaves the caller's previous bundle usable.
+    """
+    digest = _sha256_file(path)
+    if bundle.model_b is not None and bundle.manifest["input_sha256"].get("fx_file") == digest:
+        return bundle
+    config = replace(bundle.config, fx_snapshot=path)
+    model_path = _resolve(config, "model_b")
+    model = _model_b.load_model_b(clean_sales=bundle.clean_sales, fx=_fx_rates.load_fx(path),
+                                  model_path=model_path)
+    errors = {k: v for k, v in bundle.component_errors.items() if k != "model_b"}
+    hashes = {**bundle.manifest["input_sha256"], "fx_file": digest,
+              "model_b": _sha256_file(model_path)}
+    manifest = _manifest(config, hashes, bundle.manifest["source_sha256"],
+                         bundle.manifest["dataset_version_id"], bundle.data_ranges,
+                         bundle.model_a, model, errors)
+    rows = bundle.price_population_rows
+    if rows is None:
+        pop, _ = _target_population.build_price_population(bundle.clean_sales)
+        rows = frozenset(int(i) for i in pop["source_row"].to_numpy())
+    return replace(bundle, config=config, model_b=model, manifest=manifest,
+                   component_errors=errors, price_population_rows=rows)
 
 
 _CACHE: dict = {}

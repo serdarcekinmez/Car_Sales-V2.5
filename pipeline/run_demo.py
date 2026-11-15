@@ -11,9 +11,10 @@ run_demo.py  —  Phase 8: start the private customer demo, or create its passwo
                                    [--insecure-local-http | --behind-https]
                                    [--allowed-host NAME ...] [--allow-shutdown]
                                    [--open-browser]
-      Starts ONE uvicorn worker serving phase8_demo.app. It trains, evaluates, refreshes
-      and fetches nothing; the Phase-7 bundle is read from --root (default: GARAJ_DEMO_ROOT
-      or this repository). Configuration: GARAJ_DEMO_* environment variables (.env.example).
+      Starts ONE uvicorn worker serving phase8_demo.app. The frozen models and history
+      are read from --root (default: GARAJ_DEMO_ROOT or this repository). USD/TRY is
+      refreshed on startup and daily, in a cache beside the writable store; prediction
+      calls never fetch or train. Configuration: GARAJ_DEMO_* variables (.env.example).
 
 HOST RULES
   * Default host 127.0.0.1 (this machine only).

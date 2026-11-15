@@ -289,7 +289,7 @@
       return;
     }
     clearInterval(state.statusTimer);
-    state.statusTimer = null;
+    state.statusTimer = st.state === 'ready' ? setInterval(loadStatus, 60000) : null;
     if (st.state === 'ready' && !state.options) {
       try {
         state.options = await api('GET', '/api/options');
@@ -336,6 +336,9 @@
         cls: 'status-item' + (bad ? ' is-bad' : ''),
         text: `USDTRY kuru: ${b.fx.bar_range[1]} tarihine kadar` + (bad ? ' (fiyat için çok eski)' : ''),
       }));
+    }
+    if (st.fx_refresh && st.fx_refresh.message) {
+      strip.append(el('span', { cls: 'status-item is-stale', text: st.fx_refresh.message }));
     }
     const comp = b.components || {};
     strip.append(el('span', { cls: 'status-item' + (comp.model_a === 'ready' ? '' : ' is-bad'), text: 'Firma modeli: ' + (comp.model_a === 'ready' ? 'hazır' : 'kullanılamıyor') }));
